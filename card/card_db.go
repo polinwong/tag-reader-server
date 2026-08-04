@@ -75,6 +75,8 @@ var (
 
 	// ErrCardModelDelLinking is delete model have record
 	ErrCardModelDelLinking = errors.New("cannot delete this model because have linked record, please remove linked tag first")
+	// ErrCardModelNotFound is link target model not existed
+	ErrCardModelNotFound = errors.New("target model not found, please create the model first")
 )
 
 var (
@@ -147,8 +149,9 @@ func CreateCardDB(dbpath string) (d *CardDatabase, err error) {
 	}
 	d = new(CardDatabase)
 
-	// This DB can remove without critical problem becaus only save temporary record
-	if d.recDb, err = makeDB(path.Join(dbpath, "cardrecord.db"), dbAdmin, dbAdminHash); err != nil {
+	// This DB holds admin credentials (admin-hash) and admin login records (admin-record).
+	// It can be removed without losing card/model data, but admin password would need re-setup.
+	if d.recDb, err = makeDB(path.Join(dbpath, "admin.db"), dbAdmin, dbAdminHash); err != nil {
 		return nil, err
 	}
 
@@ -790,6 +793,36 @@ func (b *CardDatabase) UpdateCardPW(cardId []byte, pw string) (err error) {
 				return ErrCardDBRead
 			}
 			jsonBuf[jsonFkey] = pw
+			if m, err := json.Marshal(jsonBuf); err != nil {
+				return err
+			} else {
+				return buk.Put(cardId, m)
+			}
+		}
+		return ErrCardDBNotExists
+	})
+}
+
+func (b *CardDatabase) UpdateCardLink(cardId []byte, link string) (err error) {
+	return b.cardDb.Update(func(tx ITx) error {
+		buk := tx.Bucket([]byte(DB_CARD))
+		if buk == nil {
+			return ErrCardDBNotExists
+		}
+		if link == "" {
+			return ErrCardInput
+		}
+		// Reject if the target model does not exist (keeps FK consistent)
+		if _, err := b.ModelGetLink(link); err != nil {
+			return ErrCardModelNotFound
+		}
+
+		if data := buk.Get(cardId); data != nil {
+			jsonBuf := iris.Map{}
+			if err := json.Unmarshal(data, &jsonBuf); err != nil {
+				return ErrCardDBRead
+			}
+			jsonBuf[jsonLink] = link
 			if m, err := json.Marshal(jsonBuf); err != nil {
 				return err
 			} else {

@@ -14,6 +14,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"path/filepath"
 	"time"
 
 	// "marveldigital/sourceserver/card"
@@ -32,13 +33,29 @@ var (
 	CreateCardDBLocal   = card.CreateCardDB
 
 	LogFatalf = log.Fatalf
+
+	// basicImagePath is the directory where model images are stored/served.
+	// It is resolved at init: an explicit IMG_DIR env var wins; otherwise it
+	// is anchored to the executable's directory so the server is independent
+	// of the current working directory (safe for production/systemd/Docker).
+	basicImagePath string
 )
 
 const (
-	basicImagePath = "source/img"
-	appsName       = "com.mdl.arttagscanner"
-	ListMax        = 50
+	appsName = "com.mdl.arttagscanner"
+	ListMax  = 50
 )
+
+func init() {
+	if dir := os.Getenv("IMG_DIR"); dir != "" {
+		basicImagePath = dir
+	} else if ex, err := os.Executable(); err == nil {
+		basicImagePath = filepath.Join(filepath.Dir(ex), "source", "img")
+	} else {
+		// Fallback: CWD-relative (dev, e.g. `go run`).
+		basicImagePath = filepath.Join("source", "img")
+	}
+}
 
 func MakeCardPage(app *iris.Application) {
 	// User view
@@ -65,6 +82,7 @@ func MakeCardPage(app *iris.Application) {
 	app.Post("/verify/api/cardchecked", cardEdit).Use(checkAdminVerify)
 	app.Post("/verify/api/cardpwupdate", cardEdit).Use(checkAdminVerify)
 	app.Post("/verify/api/carddel", cardEdit).Use(checkAdminVerify)
+	app.Post("/verify/api/cardlinkset", cardEdit).Use(checkAdminVerify)
 	app.Get("/verify/api/cardsearch", cardSearch).Use(checkAdminVerify)
 
 	app.Get("/verify/api/modellist", modelList).Use(checkAdminVerify)
@@ -73,7 +91,7 @@ func MakeCardPage(app *iris.Application) {
 	app.Get("/verify/api/modelsearch", modelSearch).Use(checkAdminVerify)
 
 	app.HandleDir("/verify/js", dbPath+"/js/verify")
-	app.HandleDir("/verify/source/img", "./"+basicImagePath)
+	app.HandleDir("/verify/source/img", basicImagePath)
 	app.HandleDir("/verify/css", dbPath+"/css")
 
 	if cardBase = MakeVerifyCardLocal(dbPath); cardBase == nil {
@@ -248,7 +266,7 @@ func modelWrite(ctx iris.Context) {
 				imageID = hex.EncodeToString(hashRet[:])
 			}
 
-			if err := os.WriteFile(basicImagePath+"/"+imageID, buf, 0640); err != nil {
+			if err := os.WriteFile(filepath.Join(basicImagePath, imageID), buf, 0640); err != nil {
 				panic(errors.New("error write image, " + err.Error()))
 			}
 		}
@@ -378,6 +396,7 @@ func cardEdit(ctx iris.Context) {
 		workChecked  = "CHECKED"
 		workPWUpdate = "PWUPDATE"
 		workDel      = "DEL"
+		workLinkSet  = "LINKSET"
 	)
 	var work string
 	path := ctx.RequestPath(true)
@@ -387,6 +406,8 @@ func cardEdit(ctx iris.Context) {
 		work = workPWUpdate
 	} else if strings.Contains(path, "carddel") {
 		work = workDel
+	} else if strings.Contains(path, "cardlinkset") {
+		work = workLinkSet
 	}
 
 	var bId []byte
@@ -410,6 +431,12 @@ func cardEdit(ctx iris.Context) {
 		}
 		if work == workDel {
 			if err = cardDB.DelUpdateCard(bId, ctx.PostValue("pw")); err == nil {
+				ctx.JSON(iris.Map{"msg": "OK", "id": id})
+				return
+			}
+		}
+		if work == workLinkSet {
+			if err = cardDB.UpdateCardLink(bId, ctx.PostValue("link")); err == nil {
 				ctx.JSON(iris.Map{"msg": "OK", "id": id})
 				return
 			}

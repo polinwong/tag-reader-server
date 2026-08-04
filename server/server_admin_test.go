@@ -7,6 +7,7 @@ import (
 	"marveldigital/tag-reader-server/card/mock"
 	"marveldigital/tag-reader-server/server"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -188,7 +189,7 @@ func TestServerUp(t *testing.T) {
 
 		os.RemoveAll("source/")
 		os.Mkdir("source/", 0750)
-		os.WriteFile("source/img", []byte{}, 0750)
+		os.WriteFile(filepath.Join("source", "img"), []byte{}, 0750)
 		defer os.RemoveAll("source/")
 
 		server.LogFatalf = func(f string, v ...interface{}) {

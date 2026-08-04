@@ -27,6 +27,4 @@ config/
 *.crt
 www/refjs
 
-source/
-local/apps
-local/metakey
+sourceserver-local
