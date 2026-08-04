@@ -1,0 +1,183 @@
+<!--
+3D Artefact Exhibition server
+File: card-verify.html, NFC card tag artefact lib
+Creater: Kevin Mak, Sep 2021
+(c)Marvel Digital Ltd. 2021
+-->
+
+{{ render "admin-header.html" }}
+<script src="/js/admin/user-common.js"></script>
+
+<style>
+.hide-obj{
+  display: none;
+}
+
+.modelLinkObj{
+  font-size: 10px;
+  font-weight: bold;
+}
+</style>
+
+<div class="container-sm pt-3">
+<ul class="nav nav-tabs m-3" id="nav-tab" role="tablist">
+  <li class="nav-item" role="presentation">
+    <a class="nav-link active" id="nav-tab-l1" data-toggle="tab" href="#l1" role="tab" aria-controls="l1" aria-selected="true">Add model data</a>
+  </li>
+  <li class="nav-item" role="presentation">
+    <a class="nav-link" id="nav-tab-l2" data-toggle="tab" href="#l2" role="tab" aria-controls="l2" aria-selected="true">Model list</a>
+  </li>
+  <li class="nav-item" role="presentation">
+    <a class="nav-link" id="nav-tab-l3" data-toggle="tab" href="#l3" role="tab" aria-controls="l3" aria-selected="false">Card data</a>
+  </li>
+  <li class="nav-item" role="presentation">
+    <a class="nav-link" id="nav-tab-l4" data-toggle="tab" href="#l4" role="tab" aria-controls="l4" aria-selected="false">API Login record</a>
+  </li>
+</ul>
+</div>
+
+<div class="tab-content" id="tab-tabContent">
+
+<div class="tab-pane fade show active" id=l1 role="tabpanel" aria-labelledby="nav-tab-l1">
+  <form id="modelAddForm" enctype="multipart/form-data" class="container-sm pt-3">
+    <div class="form-group">
+      <label for="modelIdName">Model Name (required)</label>
+      <input type="text" class="form-control" id="modelIdName" aria-describedby="nameHelp">
+      <small id="nameHelp" class="form-text text-muted">The model name for description</small>
+    </div>
+    <div class="form-group">
+      <label for="modelDesc">Permaweb Links</label>
+      <input type="text" class="form-control" id="modelDesc" aria-describedby="modelDescHelp">
+      <small id="modelDescHelp" class="form-text text-muted">The link for artefact linked in NFT</small>
+    </div>
+    <div class="form-group">
+      <div class="custom-file">
+        <input type="file" class="custom-file-input" id="modelImg" accept=".png" onchange="onFileUpload(this, 'imgPreview');">
+        <label class="custom-file-label" for="modelImg">Model Image (optional)</label>
+      </div>
+      <div class="form-group mt-3 float-right" id="modelEditSubmitGroup">
+        <input id="addModelBtn" type="submit" class="btn btn-success" value="Submit">
+      </div>
+      <img class="hide-obj" style="max-height: 256px;" id="imgPreview" src="#" alt="upload image preview" />
+    </div>
+    <!-- <button id="addModelBtn" type="button" class="float-right btn btn-success" onclick="submitAddModel();">Submit</button> -->
+
+  </form>
+</div>
+
+<div class="tab-pane fade" id="l2" role="tabpanel" aria-labelledby="nav-tab-l2">
+  <div class="container-sm pt-3">
+    <div class="form-inline">
+      <button class="btn btn-success" onclick="updateModelList();"><i class="bi bi-arrow-clockwise"></i></button>
+      <button class="btn btn-success ml-3" onclick="clearUnlinkImg();"><i class="bi bi-eraser"></i></button>
+      <div class="input-group">
+        <input class="form-control ml-3" type="text" id="serachModel" oninput="serachModelFunc(this);" placeholder="Search">
+        <div class="input-group-append">
+          <button class="btn btn-outline-secondary" type="button" onclick="clearModelSearch();"><i class="bi bi-x-lg"></i></button>
+        </div>
+      </div>
+    </div>
+    <div class="row row-cols-lg-5 row-cols-md-4 row-cols-2 pt-3" id="modelListPlace">
+    </div>
+
+    <div class="container-sm pt-3">
+      <nav aria-label="Page navigation">
+        <ul class="pagination justify-content-end" id="pageBottomL2">
+        </ul>
+      </nav>
+    </div>
+  </div>
+</div>
+
+<div class="tab-pane fade" id="l3" role="tabpanel" aria-labelledby="nav-tab-l3">
+  <div class="container-sm pt-3">
+    <div class="form-inline mb-3">
+      <button class="btn btn-success" onclick="cardList();"><i class="bi bi-arrow-clockwise"></i></button>
+      <button class="btn btn-success ml-3" onclick="showCardCustom();"><i class="bi bi-pencil-square"></i></button>
+      <div class="form-group">
+        <input class="form-control ml-3" type="text" id="serachCard" oninput="serachCardFunc(this);" placeholder="Search" style="min-width: 14rem;">
+      </div>
+    </div>
+    <table class="table">
+      <thead>
+        <tr>
+          <th scope="col">#</th>
+          <th scope="col">ID</th>
+          <th scope="col">Name</th>
+          <th scope="col">CTR</th>
+          <th scope="col">Status</th>
+          <th scope="col">Show detail</th>
+        </tr>
+      </thead>
+      <tbody id="cardDataPlace"></tbody>
+    </table>
+
+    <div class="container-sm pt-3">
+      <nav aria-label="Page navigation">
+        <ul class="pagination justify-content-end" id="pageBottomL3">
+        </ul>
+      </nav>
+    </div>
+  </div>
+</div>
+
+<div class="tab-pane fade" id="l4" role="tabpanel" aria-labelledby="nav-tab-l4">
+  <div class="container-sm pt-3">
+    <table class="table">
+      <thead>
+        <tr>
+          <th scope="col">ID</th>
+          <th scope="col">Time</th>
+          <th scope="col">Delete</th>
+        </tr>
+      </thead>
+      <tbody id="adminRecordPlace"></tbody>
+    </table>
+  </div>
+</div>
+
+</div>
+
+<div id="alertPlace"></div>
+
+<div class="modal fade" id="cardCustomModal" data-backdrop="static" tabindex="-1" aria-labelledby="cardTitle" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="cardTitle"></h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div id="cardInfo"></div>
+        <div id="cardWarning"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+        <span id="cardSubmit"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="pwEditModal" data-backdrop="static" tabindex="-1" aria-labelledby="pwTitle" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="pwTitle">Edit card password</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div id="pwInfo"></div>
+        <div id="pwWarning"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+        <button id="pwSubmit" type="button" class="btn btn-primary" onclick="changeCardKey();" disabled>Submit</button>
+      </div>
+    </div>
+  </div>
+</div>

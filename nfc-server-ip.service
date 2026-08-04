@@ -1,0 +1,17 @@
+# The service for Model source server
+
+[Unit]
+Desciption=The Model Viewer, model source server
+After=network.target
+
+[Service]
+Type=simple
+user=nfc-server
+Group=nfc-server
+WorkingDirectory=/home/ubuntu/nfc-server
+ExecStart=/home/ubuntu/nfc-server/sourceserver-linux --https --port 443 --domain nfc.coinllectibles.art --cert /home/ubuntu/nfc-server/nfc_coinllectibles_art.crt --key /home/ubuntu/nfc-server/nfc.coinllectibles.art.key
+TimeoutStopSec=15
+NonBlocking=true
+
+[Install]
+WantedBy=multi-user.target

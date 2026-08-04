@@ -1,0 +1,22 @@
+<!--
+3D Artefact Exhibition server
+File: admin-login.html, Admin login page
+Creater: Kevin Mak, March 2021
+(c)Marvel Digital Ltd. 2021
+-->
+<div class="container-sm pt-3">
+  <h1>Admin page - Login</h1>
+  <form action="/verify/admin/login" method="POST">
+    <div class="form-group">
+      <label for="loginid">User</label>
+      <input type="text"
+        class="form-control" name="inid" id="loginid" aria-describedby="helpId" placeholder="">
+      <small id="helpId" class="form-text text-muted">Input the user name</small>
+    </div>
+    <div class="form-group">
+      <label for="loginpw">Password</label>
+      <input type="password" class="form-control" name="inpw" id="loginpw" placeholder="">
+    </div>
+    <button type="submit" class="btn btn-primary">Login</button>
+  </form>
+</div>

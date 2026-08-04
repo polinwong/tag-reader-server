@@ -1,0 +1,24 @@
+.fade-enter-active, .fade-leave-active {
+  transition: all 0.5s ease;
+}
+
+.fade-enter-from, .fade-leave-to {
+  opacity: 0;
+  transform: scale(0.8);
+}
+
+@media (max-width: 599px){
+  .uploadFile {
+    width: 100%;
+  }
+}
+@media (min-width: 600px) and (max-width: 1023px){
+  .uploadFile {
+    width: 80%;
+  }
+}
+@media (min-width: 1024px){
+  .uploadFile {
+    width: 60%;
+  }
+}
