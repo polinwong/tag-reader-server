@@ -50,6 +50,11 @@ go build -o sourceserver-local .
 `servIP` defaults to empty, so `iris.Addr(":4430")` binds **all interfaces**
 (`0.0.0.0`) — reachable from both the desktop app and other devices on the LAN.
 
+If startup reports that the ancient authentication demo is disabled, this is
+expected. That deprecated demo requires an optional, uncommitted reference
+dataset under `source/authdata/`; it is unrelated to NFC tag verification and
+the model images stored under `source/img/`.
+
 ### Point the desktop app at the local server
 
 Either set the env var before launching the desktop app:

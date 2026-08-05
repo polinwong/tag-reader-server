@@ -33,6 +33,19 @@ var (
 type histogramData [16][4]float64
 
 func MakeAncientAuthServer(app *iris.Application) {
+	// The ancient authentication demo depends on a reference-image dataset that
+	// is not distributed with this repository. Keep it optional so the NFC tag
+	// server can start normally without emitting one error for every missing
+	// demo image.
+	if _, err := os.Stat("./source/authdata"); err != nil {
+		if os.IsNotExist(err) {
+			log.Printf("Ancient authentication demo disabled: ./source/authdata is not installed")
+		} else {
+			log.Printf("Ancient authentication demo disabled: cannot access ./source/authdata: %s", err)
+		}
+		return
+	}
+
 	// [Commented out] climgt not available for local build
 	// logio = climgt.Logio
 	// [Replacement] Use local logger writing to stdout instead of climgt.Logio
