@@ -89,6 +89,35 @@ Creater: Kevin Mak, Sep 2021
   </div>
 </div>
 
+<!-- Card re-link modal -->
+<div class="modal fade" id="cardLinkModal" data-backdrop="static" tabindex="-1" aria-labelledby="cardLinkTitle" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="cardLinkTitle">Re-link card to model</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="relinkCardId">Card ID</label>
+          <input type="text" class="form-control" id="relinkCardId" readonly>
+        </div>
+        <div class="form-group">
+          <label for="relinkModelSel">Model</label>
+          <select class="form-control" id="relinkModelSel"></select>
+        </div>
+        <div id="cardLinkWarning"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-primary" id="relinkSubmit" onclick="relinkCardSubmit();">Re-link</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="tab-pane fade" id="l3" role="tabpanel" aria-labelledby="nav-tab-l3">
   <div class="container-sm pt-3">
     <div class="form-inline mb-3">
@@ -119,6 +148,9 @@ Creater: Kevin Mak, Sep 2021
       </nav>
     </div>
   </div>
+</div>
+
+
 </div>
 
 <div class="tab-pane fade" id="l4" role="tabpanel" aria-labelledby="nav-tab-l4">
@@ -161,6 +193,9 @@ Creater: Kevin Mak, Sep 2021
   </div>
 </div>
 
+
+</div>
+
 <div class="modal fade" id="pwEditModal" data-backdrop="static" tabindex="-1" aria-labelledby="pwTitle" aria-hidden="true">
   <div class="modal-dialog">
     <div class="modal-content">
@@ -180,4 +215,7 @@ Creater: Kevin Mak, Sep 2021
       </div>
     </div>
   </div>
+</div>
+
+
 </div>

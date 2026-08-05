@@ -11,6 +11,7 @@ import (
 	"marveldigital/tag-reader-server/card/mock"
 	"marveldigital/tag-reader-server/server"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -591,7 +592,7 @@ func TestAdminCardView(t *testing.T) {
 func TestAdminModelView(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	server.UpdateLogio(log.Default())
-	imgPath := "source/img"
+	imgPath := filepath.Join("source", "img")
 
 	// DB mock
 	e, _, _, mockTx, mockBuk := makeHttpTest(t)
@@ -651,7 +652,7 @@ func TestAdminModelView(t *testing.T) {
 		modelData := defaultModelSet()
 
 		for i := 1; i <= 5; i++ {
-			addr := imgPath + "/i" + strconv.Itoa(i)
+			addr := filepath.Join(imgPath, "i"+strconv.Itoa(i))
 			os.WriteFile(addr, []byte{}, 0600)
 		}
 

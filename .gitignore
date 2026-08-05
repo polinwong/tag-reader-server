@@ -1,3 +1,10 @@
+# IDE directories
+.codeartsdoer/
+.vscode/
+
+climgt-remote/
+
+
 # Binaries for programs and plugins
 *.exe
 *.exe~
@@ -16,11 +23,8 @@
 
 # Project self auto gen
 config/
-*.db
 *.pem
 *.crt
 www/refjs
 
-source/
-local/apps
-local/metakey
+sourceserver-local

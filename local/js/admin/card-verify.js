@@ -388,7 +388,8 @@ function cardRenderList() {
         status = `<span style="color: #c10015;cursor: pointer;" onclick="cardChecked('` + e.id + `');">REPEATED</span>`;
         break;
     }
-    let signBtn = `<a class="px-1" href="#" onclick="delCardCustom('`+ e.id + `');"><i class="bi-edit bi-trash-fill"></i></a>
+    let signBtn = `<a class="px-1" href="#" onclick="relinkCardShow('`+ e.id + `');"><i class="bi-edit bi-link-45deg" title="Re-link to model"></i></a>
+    <a class="px-1" href="#" onclick="delCardCustom('`+ e.id + `');"><i class="bi-edit bi-trash-fill"></i></a>
     <a class="px-1" href="#" onclick="changeCardKeyShow('`+ e.id + `', '` + e.fkey + `', '` + e.sign + `');"><i class="bi-edit bi-three-dots-vertical"></i></a>`;
     $("#cardDataPlace").append(`<tr>
 <th scope="row">` + c + `</th>
@@ -488,6 +489,48 @@ function changeCardKeyShow (id, orgPw, sign) {
   </div>
 </form>`);
   $("#pwEditModal").modal('show');
+}
+
+function relinkCardShow (id) {
+  if (modelListBase == null || modelListBase.length == 0) {
+    $.get("/verify/api/modellist?page=0", function (data) {
+      if (data.msg == "OK") fillModelList(data.items);
+      relinkCardShow(id);
+    });
+    return;
+  }
+  let optionlist = "";
+  for (let i = 0; i < modelListBase.length; i++) {
+    optionlist += `<option value="` + modelListBase[i].id + `">` + modelListBase[i].name + `</option>`;
+  }
+  $("#relinkCardId").val(id);
+  $("#relinkModelSel").empty();
+  $("#relinkModelSel").append(optionlist);
+  $("#cardLinkModal").modal("show");
+}
+
+function relinkCardSubmit () {
+  let id = $("#relinkCardId").val();
+  let link = $("#relinkModelSel").val();
+  if (id == "" || link == "") return;
+  $.post("/verify/api/cardlinkset", { id: id, link: link })
+    .done((data) => {
+      let alert = $("#alertPlace");
+      alert.empty();
+      if (data.msg == "OK") {
+        $("#cardLinkModal").modal("hide");
+        alert.append(getAlert(true, "Card re-linked to model"));
+        setTimeout(function () { alert.empty(); }, 3000);
+        cardList(pageNum); // re-fetch from server so the list updates immediately
+      } else {
+        $("#cardLinkWarning").empty();
+        $("#cardLinkWarning").append(`<span style="color: red;">Card re-link failed</span>`);
+      }
+    })
+    .catch(() => {
+      $("#cardLinkWarning").empty();
+      $("#cardLinkWarning").append(`<span style="color: red;">Card re-link failed</span>`);
+    });
 }
 
 function checkInput (input, submit, size) {

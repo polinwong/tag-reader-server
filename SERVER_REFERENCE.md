@@ -55,8 +55,8 @@ The server entry point is `main.go`. It creates a CLI application via `climgt` a
 VerifyCard
 **Key initialization in `MakeCardPage`**:
 - `card.MakeVerifyCard(dbPath)` - creates `VerifyCard` struct, generates/loads the 16-byte `SdmMetaKey` from `local/metakey`
-- `card.CreateCardDB(dbPath)` - opens `cardrecord.db` and `carddata.db`, creates required buckets
-- Creates `source/img` directory for model image storage
+- `card.CreateCardDB(dbPath)` - opens `admin.db` and `carddata.db`, creates required buckets
+- Creates the `source/img` directory for model image storage. The path is resolved relative to the **executable's directory** (i.e. `<exe-dir>/source/img`); an explicit directory may be set via the `IMG_DIR` environment variable. This makes image storage independent of the current working directory (safe for systemd/Docker deployment).
 
 ### 2.2 API Routes
 
@@ -159,10 +159,10 @@ The server uses two authentication mechanisms:
 
 #### Model Operations
 - **List Models** (`modelList`): Paginated list of all models (50 per page). Each model includes `id`, `name`, `desc`, `image`, and `img` (image URL path).
-- **Write Model** (`modelWrite`): Create or update a model. If `modelId` is provided, updates existing; otherwise creates new. Image is stored as a file in `source/img/` with SHA-256 hash as filename. Supports deletion via `modelDel=1`.
+- **Write Model** (`modelWrite`): Create or update a model. If `modelId` is provided, updates existing; otherwise creates new. Image is stored as a file in `<exe-dir>/source/img/` (or `IMG_DIR` if set) with SHA-256 hash as filename. Supports deletion via `modelDel=1`.
 - **Delete Model** (`modelWrite` with `modelDel=1`): Fails if any card is linked to the model (`ErrCardModelDelLinking`).
 - **Search Models** (`modelSearch`): Case-insensitive search by model name.
-- **Clean Images** (`modelImgClean`): Removes image files from `source/img/` that are no longer referenced by any model record.
+- **Clean Images** (`modelImgClean`): Removes image files from `<exe-dir>/source/img/` (or `IMG_DIR`) that are no longer referenced by any model record.
 
 ---
 
@@ -291,7 +291,7 @@ VerifyUID(sign, uid)  [card/verify_base.go]
 | `SdmMetaKey` | `local/metakey` | AES/LRP key for decrypting PICC data from NFC tags | 16 bytes (AES-128) |
 | `cardFileKey` | `carddata.db` (per card) | SDM MAC calculation key, unique per NFC tag | 16 bytes (hex-encoded UUID) |
 | ECDSA Public Key | Hardcoded in `verify_base.go` | Verifying card UID signatures | P-224 curve |
-| Admin Password Hash | `cardrecord.db` (admin-hash bucket) | Admin login verification | HMAC-SHA256 |
+| Admin Password Hash | `admin.db` (admin-hash bucket) | Admin login verification | HMAC-SHA256 |
 | Debug Key | Hardcoded (all zeros) | Used when `--debug` flag is set | 16 bytes |
 
 ### 3.5 Card Status Values
@@ -314,14 +314,14 @@ The server uses **bbolt** (BoltDB), an embedded key-value database. Data is orga
 
 | File | Created By | Description |
 |------|-----------|-------------|
-| `cardrecord.db` | `CreateCardDB()` | Admin records: login sessions and credentials |
+| `admin.db` | `CreateCardDB()` | Admin records: login sessions and credentials |
 | `carddata.db` | `CreateCardDB()` | Card data and model/artefact records |
 | `adminsession.db` | `MakeCardAdmin()` | Iris web framework session storage |
 | `local/metakey` | `MakeMetaKeyFile()` | 16-byte AES key for PICC decryption (not a bbolt database) |
 
 ### 4.2 Bucket Structure
 
-#### `cardrecord.db`
+#### `admin.db`
 
 **Bucket: `admin-record`**
 
@@ -397,7 +397,7 @@ Stores model/artefact records. Each model is identified by a UUID.
 |-------|------|-------------|
 | `name` | string | Model/artefact name |
 | `desc` | string | Model/artefact description |
-| `image` | string | Image filename (SHA-256 hash of image content) stored in `source/img/` |
+| `image` | string | Image filename (SHA-256 hash of image content) stored in `<exe-dir>/source/img/` (or `IMG_DIR`) |
 
 **Key operations:**
 - `ModelAddLink()`: Create or update a model record
@@ -441,7 +441,7 @@ Verification Process
 | Path | Description |
 |------|-------------|
 | `local/metakey` | 16-byte AES key for PICC data decryption. Auto-generated on first startup. |
-| `source/img/<hash>` | Model/artefact images. Filename is the SHA-256 hash of the image content. |
+| `source/img/<hash>` | Model/artefact images. Filename is the SHA-256 hash of the image content. Located at `<exe-dir>/source/img/` (or `IMG_DIR`). |
 | `config/` | Runtime configuration directory (gitignored). Contains log files. |
 
 ---
