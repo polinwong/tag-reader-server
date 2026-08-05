@@ -1,0 +1,31 @@
+{
+  // See https://go.microsoft.com/fwlink/?LinkId=733558
+  // for the documentation about the tasks.json format
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Linux x64",
+      "type": "shell",
+      "command": "./build-bin.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "Build Win x64",
+      "type": "shell",
+      "command": "./build-bin.sh win"
+    },
+    {
+      "label": "Test",
+      "type": "shell",
+      "command": "go test -coverpkg=./... -coverprofile=c.out ./...",
+      "problemMatcher": []
+    },
+    {
+      "label": "Coverage",
+      "type": "shell",
+      "command": "go tool cover -html=c.out",
+      "dependsOn": ["Test"],
+      "problemMatcher": []
+    },
+  ]
+}

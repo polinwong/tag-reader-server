@@ -1,0 +1,231 @@
+package server
+
+import (
+	"errors"
+	"html/template"
+	"log"
+	"marveldigital/tag-reader-server/card"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/kataras/iris/v12"
+)
+
+var (
+	cardAdmin *card.CardAdmin
+
+	// The session manager to improve timeout and performance
+	AppSess AppSession
+)
+
+const baseTitle = "NFC tag verify server"
+
+type AppSession struct {
+	Ch chan bool
+
+	updateTime time.Duration
+	removeTime time.Duration
+
+	session map[string]int64
+	started bool
+	ticker  *time.Ticker
+	mu      sync.Mutex
+}
+
+func (u *AppSession) Update(token string, curTimeout int64) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if u.session == nil {
+		u.session = make(map[string]int64)
+	}
+	u.session[token] = curTimeout
+	if u.started {
+		return
+	}
+	if u.updateTime == 0 {
+		u.updateTime = time.Minute * 30
+	}
+	if u.removeTime == 0 {
+		u.removeTime = time.Hour
+	}
+
+	go func() {
+		u.mu.Lock()
+		u.started = true
+		u.ticker = time.NewTicker(u.updateTime)
+		u.Ch = make(chan bool, 1)
+		u.mu.Unlock()
+
+		for range u.ticker.C {
+			log.Println("update session")
+			if err := cardDB.OnLoginUpdate(u.session); err != nil {
+				logio.Println("auto session update failed")
+			}
+			u.mu.Lock()
+			rmtime := u.removeTime
+			u.mu.Unlock()
+			for i, v := range u.session {
+				if time.Since(time.Unix(v, 0)) > rmtime {
+					delete(u.session, i)
+				}
+			}
+			if !u.started || len(u.session) == 0 {
+				break
+			}
+		}
+
+		u.mu.Lock()
+		u.session = nil
+		u.ticker = nil
+		u.started = false
+		u.mu.Unlock()
+		u.Ch <- true
+	}()
+}
+
+func (u *AppSession) Kill() {
+	if u.started && u.ticker != nil {
+		log.Println("to kill the app session...")
+		u.mu.Lock()
+		u.started = false
+		u.mu.Unlock()
+		u.ticker.Reset(time.Microsecond)
+		<-u.Ch
+	}
+}
+
+func (u *AppSession) ChangeTime(update, remove time.Duration) error {
+	if update <= 0 || remove <= 0 {
+		return errors.New("duration not greater the 0")
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.updateTime = update
+	u.removeTime = remove
+	return nil
+}
+
+func MakeAdminPage(app *iris.Application) {
+	cardAdmin = card.MakeCardAdmin(hostname, dbPath)
+
+	tmpl := iris.HTML(dbPath+"/html", ".html")
+	tmpl.AddFunc("html", func(text string) template.HTML {
+		return template.HTML(text)
+	})
+	app.RegisterView(tmpl)
+
+	if haveIndex {
+		app.Get("/", func(c iris.Context) { c.Redirect("/verify") })
+	}
+	// app.Favicon(dbPath+"/html/")
+	app.Get("/verify", LoginPage)
+	app.Get("/verify/admin/security", adminSecurity).Use(checkAdminVerify)
+	app.Post("/verify/admin/changepw", adminChangePW).Use(checkAdminVerify)
+	app.Post("/verify/admin/logout", adminLogout).Use(checkAdminVerify)
+	app.Post("/verify/admin/login", adminLogin)
+
+	r := app.HandleDir("js/admin", dbPath+"/js/admin")
+	r.Use(checkAdminVerify)
+}
+
+func MakeIndex() {
+	haveIndex = true
+}
+
+func checkAdminVerify(ctx iris.Context) {
+	defer func() {
+		if err := recover(); err != nil {
+			logio.Printf("panic checkAdmin, %s", err)
+			ctx.StatusCode(iris.StatusInternalServerError)
+			ctx.WriteString("500 Internal Server Error")
+		}
+	}()
+	if token := ctx.GetHeader("X-token"); len(token) > 0 {
+		switch ctx.RequestPath(true) {
+		case "/verify/api/modellist":
+		case "/verify/api/cardwrite":
+		case "/verify/api/cardsearch":
+		default:
+			ctx.NotFound()
+			return
+		}
+		if curTimeout, err := cardDB.CheckLoginSession(token); err != nil {
+			ctx.NotFound()
+		} else {
+			AppSess.Update(token, curTimeout)
+			ctx.Next()
+		}
+		return
+	}
+	if ret := cardAdmin.AdminCheck(ctx); ret != card.SessionPassed {
+		ctx.NotFound()
+		return
+	}
+	ctx.Next()
+}
+
+func LoginPage(ctx iris.Context) {
+	ctx.ViewLayout("page-layout.html")
+	if cardAdmin.AdminCheck(ctx) != card.SessionPassed {
+		ctx.ViewData("title", "Admin Login - "+baseTitle)
+		ctx.ViewData("addon", "")
+		ctx.ViewData("message", "")
+		ctx.View("admin-login.html")
+	} else {
+		ctx.Redirect("/verify/admin")
+	}
+}
+
+func loginFailLog(addr string) {
+	if strings.Count(addr, ".") == 3 && strings.Count(addr, ":") == 1 {
+		addrIp := addr[0:strings.Index(addr, ":")]
+		logio.Printf("Login failed: %s", addrIp)
+	} else {
+		logio.Printf("Login failed with unknown: %s", addr)
+	}
+}
+
+func adminLogin(ctx iris.Context) {
+	if cardAdmin.AdminIn(ctx, cardDB) == card.SessionPassed {
+		ctx.Redirect("/verify/admin")
+	} else {
+		loginFailLog(ctx.Request().RemoteAddr)
+		ctx.WriteString("Login failed")
+	}
+}
+
+func adminSecurity(ctx iris.Context) {
+	ctx.ViewLayout("page-layout.html")
+	ctx.ViewData("navActiveL2", " active")
+	ctx.View("admin-security.html")
+}
+
+func adminChangePW(ctx iris.Context) {
+	orgid := ctx.PostValue("orgid")
+	orgpw := ctx.PostValue("orgpw")
+	id := ctx.PostValue("changeid")
+	pw := ctx.PostValue("changepw")
+	pw2 := ctx.PostValue("changepw2")
+
+	if len(id) == 0 || len(pw) == 0 || len(pw2) == 0 || len(orgpw) == 0 {
+		ctx.StatusCode(iris.StatusBadRequest)
+		ctx.JSON(iris.Map{"msg": "FAIL", "info": "Bad request"})
+		return
+	}
+	if strings.Compare(pw, pw2) != 0 {
+		ctx.JSON(iris.Map{"msg": "FAIL", "info": "Password not same"})
+		return
+	}
+
+	if err := cardDB.ChangeAdminPW(id, pw, orgid, orgpw); err == nil {
+		ctx.JSON(iris.Map{"msg": "OK"})
+	} else {
+		ctx.JSON(iris.Map{"msg": "FAIL", "info": "Change password failed: " + err.Error()})
+	}
+}
+
+func adminLogout(ctx iris.Context) {
+	cardAdmin.AdminOut(ctx)
+	ctx.Redirect("/verify/")
+}

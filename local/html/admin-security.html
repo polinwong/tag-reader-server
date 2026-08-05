@@ -1,0 +1,42 @@
+<!--
+3D Artefact Exhibition server
+File: admin-secuiry.html, Admin secuiry page
+Creater: Kevin Mak, October 2021
+(c)Marvel Digital Ltd. 2021
+-->
+{{ render "admin-header.html" }}
+<script src="/js/admin/admin-security.js"></script>
+
+<div class="container-sm pt-3">
+  <h1>Security page</h1>
+  <h4 class="pt-3">Change password</h4>
+  <form>
+    <div class="form-group">
+      <label for="orgid">Original User</label>
+      <input type="text"
+        class="form-control" name="inorgid" id="orgid" aria-describedby="helpId1" placeholder="">
+      <small id="helpId1" class="form-text text-muted">Input the user name</small>
+    </div>
+    <div class="form-group">
+      <label for="orgpw">Original password</label>
+      <input type="password" class="form-control" name="inorgpw" id="orgpw" placeholder="">
+    </div>
+    <div class="form-group">
+      <label for="loginid">New user</label>
+      <input type="text"
+        class="form-control" name="inid" id="changeid" aria-describedby="helpId2" placeholder="">
+      <small id="helpId2" class="form-text text-muted">New user name</small>
+    </div>
+    <div class="form-group">
+      <label for="changepw">New password</label>
+      <input type="password" class="form-control" name="inpw" id="changepw" placeholder="">
+    </div>
+    <div class="form-group">
+      <label for="changepw2">Repeat new password</label>
+      <input type="password" class="form-control" name="inpw2" id="changepw2" placeholder="">
+    </div>
+    <button id="changebtn" type="submit" class="btn btn-primary">Change</button>
+  </form>
+</div>
+
+<div id="alertPlace"></div>
