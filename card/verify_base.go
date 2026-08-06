@@ -71,7 +71,10 @@ func MakeMetaKeyFile(targetPath string) {
 		if n, err := rand.Read(raw); err != nil || n != 16 {
 			panic("create key failed")
 		}
-		keyFile.Write(raw)
+		if n, err := keyFile.Write(raw); err != nil || n != 16 {
+			panic("write key failed")
+		}
+		SdmMetaKey = raw
 	} else if s.Size() == 16 {
 		SdmMetaKey = MakeBytes(16, 0)
 		if n, err := keyFile.Read(SdmMetaKey); err != nil || n != 16 {

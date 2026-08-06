@@ -23,8 +23,15 @@ func TestMakeMetaKeyFile(t *testing.T) {
 	// 1. Create the meta key first
 	t.Run(`1.CreateMetaKey`, func(t *testing.T) {
 		card.MakeMetaKeyFile(tempPath)
-		if fst, err := os.Stat(tempPath + "/metakey"); err != nil && fst.Size() != 16 {
-			t.Errorf(`Should metakey generated`)
+		keyOnDisk, err := os.ReadFile(tempPath + "/metakey")
+		if err != nil {
+			t.Fatalf(`Should metakey be generated: %v`, err)
+		}
+		if len(keyOnDisk) != 16 {
+			t.Fatalf(`Should generate a 16-byte metakey, got %d bytes`, len(keyOnDisk))
+		}
+		if !bytes.Equal(keyOnDisk, card.SdmMetaKey) {
+			t.Errorf(`Should load the newly generated metakey into memory`)
 		}
 	})
 
