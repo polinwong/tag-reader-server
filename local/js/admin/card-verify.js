@@ -18,6 +18,7 @@ var topPage = "nav-tab-l1";
 var modelListBase = [];
 var cardListBase = [];
 var loginListBase = [];
+var modelInfoModified = false;
 
 var filterModel = "", filterCard = "";
 var filterModelSize = 0, filterCardSize = 0;
@@ -50,6 +51,16 @@ $(document).ready(function () {
       topPage = "nav-tab-l4";
       loginList();
     }
+  });
+
+  $("#cardCustomModal").on("hidden.bs.modal", function () {
+    if (!modelInfoModified) {
+      return;
+    }
+
+    modelInfoModified = false;
+    modelListBase = [];
+    modelList(pageNum >= 0 ? pageNum : 0);
   });
 
   let addform = document.forms.namedItem("modelAddForm");
@@ -167,6 +178,7 @@ function editModelSubmit() {
   let valDesc = $("#editModelDesc").val();
   let valImage = $("#editModelImg")[0].files[0];
   let valId = $("#editModelId").val();
+  let hasChanges = valName.trim() !== "" || valDesc.trim() !== "" || valImage != null;
   formData.append("modelIdName", valName);
   formData.append("modelDesc", valDesc);
   formData.append("modelImg", valImage);
@@ -193,8 +205,9 @@ function editModelSubmit() {
       let data = JSON.parse(ret);
       $("#uploadSpin3").remove();
       if (data.msg == "OK") {
+        modelInfoModified = hasChanges;
         $("#cardCustomModal").modal("hide");
-        alert.append(getAlert(true, "Added model id: " + data.retid));
+        alert.append(getAlert(true, "Model information updated."));
       } else {
         alert.append(getAlert(false, data.info));
       }
@@ -207,6 +220,7 @@ function editModelSubmit() {
 }
 
 function editModel(id) {
+  modelInfoModified = false;
   $("#cardTitle").empty();
   $("#cardTitle").append(`Edit model info`);
   $("#cardSubmit").empty();

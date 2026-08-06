@@ -168,10 +168,16 @@ func removeLoginRecord(ctx iris.Context) {
 }
 
 func verifyAdmin(ctx iris.Context) {
+	jsVersion := "dev"
+	if info, err := os.Stat(filepath.Join(dbPath, "js", "admin", "card-verify.js")); err == nil {
+		jsVersion = fmt.Sprintf("%d", info.ModTime().UnixNano())
+	}
+
+	ctx.Header("Cache-Control", "no-cache")
 	ctx.ViewLayout("page-layout.html")
 	ctx.ViewData("title", "Card verify")
-	ctx.ViewData("addon", `<script src="https://cdn.jsdelivr.net/npm/bs-custom-file-input/dist/bs-custom-file-input.min.js"></script>
-<script src="/js/admin/card-verify.js"></script>`)
+	ctx.ViewData("addon", fmt.Sprintf(`<script src="https://cdn.jsdelivr.net/npm/bs-custom-file-input/dist/bs-custom-file-input.min.js"></script>
+<script src="/js/admin/card-verify.js?v=%s"></script>`, jsVersion))
 	ctx.ViewData("message", "")
 	ctx.ViewData("navActiveL1", " active")
 	ctx.View("card-verify.html")
