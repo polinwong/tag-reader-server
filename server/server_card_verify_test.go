@@ -434,6 +434,8 @@ func TestAdminCardView(t *testing.T) {
 
 	t.Run("5.WriteTag", func(t *testing.T) {
 		// cardData := defaultCardSet()
+		card.SdmMetaKey = bytes.Repeat([]byte{0x11}, 16)
+		card.AppMasterKey = bytes.Repeat([]byte{0x22}, 16)
 
 		id := "BHcogk1lgA=="
 		sign := "nHBoY2ooX-uh4kBmVACdzm6KnJzjGL4CYu0WJRm5cLMvuAKFhCDWZ9Es680yu0vIr-IcdTpabCY="
@@ -453,7 +455,9 @@ func TestAdminCardView(t *testing.T) {
 		mockBuk.EXPECT().Put(bId, gomock.Any()).Return(nil)
 		mockTx.EXPECT().Bucket([]byte(card.DB_CARD)).Return(mockBuk).Times(2)
 		e.POST("/verify/api/cardwrite").WithForm(getForm()).
-			WithHeader("X-Requested-With", "com.mdl.arttagscanner").Expect()
+			WithHeader("X-Requested-With", "com.mdl.arttagscanner").Expect().
+			Body().Contains(`"metakey":"11111111111111111111111111111111"`).
+			Contains(`"appmasterkey":"22222222222222222222222222222222"`)
 
 		// 5.2. Should return fail message when db failed
 		err := errors.New("db error")

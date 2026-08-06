@@ -352,7 +352,13 @@ func cardWrite(ctx iris.Context) {
 		return
 	}
 	appCORSHandle(ctx)
-	ctx.JSON(iris.Map{"msg": "OK", "id": id, "fkey": fkey, "metakey": hex.EncodeToString(card.SdmMetaKey)})
+	ctx.JSON(iris.Map{
+		"msg":          "OK",
+		"id":           id,
+		"fkey":         fkey,
+		"metakey":      hex.EncodeToString(card.SdmMetaKey),
+		"appmasterkey": hex.EncodeToString(card.AppMasterKey),
+	})
 }
 
 func cardData(ctx iris.Context) {

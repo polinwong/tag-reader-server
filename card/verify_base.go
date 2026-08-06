@@ -31,7 +31,8 @@ var (
 
 	LastErrorID string
 
-	SdmMetaKey []byte // Meta key is auto generate from startup
+	AppMasterKey []byte // Application master key, generated/loaded at startup
+	SdmMetaKey   []byte // SDM meta read key, generated/loaded at startup
 
 	sdmTestKey = []byte{
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -53,15 +54,24 @@ type VerifyCard struct {
 func MakeVerifyCard(dbPath string) (card *VerifyCard) {
 	card = new(VerifyCard)
 	card.genPublicKey()
+	MakeAppMasterKeyFile(dbPath)
 	MakeMetaKeyFile(dbPath)
 
 	return card
 }
 
+func MakeAppMasterKeyFile(targetPath string) {
+	AppMasterKey = loadOrCreateAESKey(targetPath + "/appmasterkey")
+}
+
 func MakeMetaKeyFile(targetPath string) {
-	keyFile, err := os.OpenFile(targetPath+"/metakey", os.O_CREATE|os.O_RDWR, 0640)
+	SdmMetaKey = loadOrCreateAESKey(targetPath + "/metakey")
+}
+
+func loadOrCreateAESKey(keyPath string) []byte {
+	keyFile, err := os.OpenFile(keyPath, os.O_CREATE|os.O_RDWR, 0640)
 	if err != nil {
-		panic("must create key file to verify NFC NTAG424DNA")
+		panic("must create key file for NFC NTAG424DNA")
 	}
 	defer keyFile.Close()
 
@@ -74,12 +84,13 @@ func MakeMetaKeyFile(targetPath string) {
 		if n, err := keyFile.Write(raw); err != nil || n != 16 {
 			panic("write key failed")
 		}
-		SdmMetaKey = raw
+		return raw
 	} else if s.Size() == 16 {
-		SdmMetaKey = MakeBytes(16, 0)
-		if n, err := keyFile.Read(SdmMetaKey); err != nil || n != 16 {
+		raw := MakeBytes(16, 0)
+		if n, err := keyFile.Read(raw); err != nil || n != 16 {
 			panic("read current key failed")
 		}
+		return raw
 	} else {
 		panic("key file format error")
 	}

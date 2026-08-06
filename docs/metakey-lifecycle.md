@@ -10,6 +10,9 @@ The MetaKey is the **SDM Meta Read Key** defined in the NXP NTAG 424 DNA specifi
 
 **File location:** `local/metakey` (relative to the server working directory)
 
+The separate application master key is stored in `local/appmasterkey`. It is
+provisioned as NTAG key 0, while `SdmMetaKey` is provisioned as key 2.
+
 **In-memory variable:** `card.SdmMetaKey` (`[]byte`, 16 bytes)
 
 Source: `card/verify_base.go:34`
@@ -53,7 +56,7 @@ func MakeMetaKeyFile(targetPath string) {
 ```
 
 **Key behavior:**
-- File does not exist or is empty (size == 0): generates a new random key via `crypto/rand.Read()` and writes it to the file. **Note:** `SdmMetaKey` is NOT loaded into memory in this branch -- the key is only written to disk. The in-memory `SdmMetaKey` remains `nil` until the next startup reads it.
+- File does not exist or is empty (size == 0): generates a new random key via `crypto/rand.Read()`, writes it to the file, and assigns it to `SdmMetaKey` immediately.
 - File exists and is exactly 16 bytes: reads the key into `SdmMetaKey`.
 - File exists but is not 0 or 16 bytes: **panics** with `"key file format error"`.
 
@@ -154,7 +157,6 @@ sdmTestKey = []byte{
 | `metakey` file truncated to 0 bytes | New random key generated (same as deleted) | All previously registered tags fail verification |
 | `metakey` file corrupted (size != 0 and != 16) | Server **panics** and refuses to start | Server is down, no verification possible |
 | `metakey` file has wrong 16 bytes | Server starts normally, reads the wrong key | All previously registered tags fail verification (wrong decryption key) |
-| `SdmMetaKey` is `nil` (first-generation bug) | AES cipher creation would panic | Server crashes during verification |
 
 **Important:** There is no mechanism to rotate or update the metakey. Once NFC tags are programmed with a specific metakey, that key must remain in the `local/metakey` file for those tags to remain verifiable.
 
@@ -168,6 +170,7 @@ The NFC verification process uses **two separate keys**:
 |-----|---------|-----------|----------|
 | `SdmMetaKey` (MetaKey) | Decrypt PICC data from the NFC tag | `local/metakey` file | No -- shared across all tags |
 | `filekey` (SDM File Read Key) | Calculate SDM MAC to verify tag authenticity | `carddata.db` (per card record) | Yes -- unique per tag |
+| `AppMasterKey` | Authorize tag key and file-setting changes as key 0 | `local/appmasterkey` file | No -- shared across all tags |
 
 The verification flow is:
 1. **Decrypt** PICC data using `SdmMetaKey` -> extract UID and CTR

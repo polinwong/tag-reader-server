@@ -150,7 +150,7 @@ The server uses two authentication mechanisms:
 ### 2.4 Card and Model Management
 
 #### Card Operations
-- **Write Card** (`cardWrite`): Creates a new card record or updates an existing one. Requires a valid ECDSA signature (`VerifyUIDBase64`). The card UID (7 bytes, base64URL-encoded) and signature (56 bytes, base64URL-encoded) are mandatory. A UUID-based `filekey` is auto-generated for new cards. Returns the `filekey` and `metakey` (hex-encoded).
+- **Write Card** (`cardWrite`): Creates a new card record or updates an existing one. Requires a valid ECDSA signature (`VerifyUIDBase64`). The card UID (7 bytes, base64URL-encoded) and signature (56 bytes, base64URL-encoded) are mandatory. A UUID-based `filekey` is auto-generated for new cards. Returns the `appmasterkey`, `filekey`, and `metakey` (hex-encoded).
 - **Read Card** (`ReadCardData`): Returns the card signature and linked model ID for a given 7-byte UID.
 - **Edit Card Status** (`cardEdit` with `cardchecked`): Resets card status to `NORMAL`.
 - **Update Card File Key** (`cardEdit` with `cardpwupdate`): Updates the card's `filekey` (must be 32 hex chars).
@@ -289,6 +289,7 @@ VerifyUID(sign, uid)  [card/verify_base.go]
 | Key | Location | Purpose | Size |
 |-----|----------|---------|------|
 | `SdmMetaKey` | `local/metakey` | AES/LRP key for decrypting PICC data from NFC tags | 16 bytes (AES-128) |
+| `AppMasterKey` | `local/appmasterkey` | Key 0 used to authorize tag administration | 16 bytes (AES-128) |
 | `cardFileKey` | `carddata.db` (per card) | SDM MAC calculation key, unique per NFC tag | 16 bytes (hex-encoded UUID) |
 | ECDSA Public Key | Hardcoded in `verify_base.go` | Verifying card UID signatures | P-224 curve |
 | Admin Password Hash | `admin.db` (admin-hash bucket) | Admin login verification | HMAC-SHA256 |
@@ -318,6 +319,7 @@ The server uses **bbolt** (BoltDB), an embedded key-value database. Data is orga
 | `carddata.db` | `CreateCardDB()` | Card data and model/artefact records |
 | `adminsession.db` | `MakeCardAdmin()` | Iris web framework session storage |
 | `local/metakey` | `MakeMetaKeyFile()` | 16-byte AES key for PICC decryption (not a bbolt database) |
+| `local/appmasterkey` | `MakeAppMasterKeyFile()` | 16-byte AES key provisioned as NTAG application key 0 |
 
 ### 4.2 Bucket Structure
 
@@ -441,6 +443,7 @@ Verification Process
 | Path | Description |
 |------|-------------|
 | `local/metakey` | 16-byte AES key for PICC data decryption. Auto-generated on first startup. |
+| `local/appmasterkey` | 16-byte application master key for tag administration. Auto-generated on first startup. |
 | `source/img/<hash>` | Model/artefact images. Filename is the SHA-256 hash of the image content. Located at `<exe-dir>/source/img/` (or `IMG_DIR`). |
 | `config/` | Runtime configuration directory (gitignored). Contains log files. |
 

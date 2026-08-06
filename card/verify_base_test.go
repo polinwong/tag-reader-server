@@ -78,6 +78,29 @@ func TestMakeMetaKeyFile(t *testing.T) {
 	})
 }
 
+func TestMakeAppMasterKeyFile(t *testing.T) {
+	tempPath := MakeTempPath()
+	defer os.RemoveAll(tempPath)
+
+	card.MakeAppMasterKeyFile(tempPath)
+	keyOnDisk, err := os.ReadFile(tempPath + "/appmasterkey")
+	if err != nil {
+		t.Fatalf(`Should app master key be generated: %v`, err)
+	}
+	if len(keyOnDisk) != 16 {
+		t.Fatalf(`Should generate a 16-byte app master key, got %d bytes`, len(keyOnDisk))
+	}
+	if !bytes.Equal(keyOnDisk, card.AppMasterKey) {
+		t.Errorf(`Should load the newly generated app master key into memory`)
+	}
+
+	card.AppMasterKey = nil
+	card.MakeAppMasterKeyFile(tempPath)
+	if !bytes.Equal(keyOnDisk, card.AppMasterKey) {
+		t.Errorf(`Should reload the same app master key from disk`)
+	}
+}
+
 func TestMakeVerfiyCard(t *testing.T) {
 	tempPath := MakeTempPath()
 	defer os.RemoveAll(tempPath)
