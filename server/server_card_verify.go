@@ -142,8 +142,8 @@ func verifyApiLogin(ctx iris.Context) {
 	}
 
 	if cardAdmin.AdminIn(ctx, cardDB) == card.SessionPassed {
-		if id, err := cardDB.OnLoginUser(); err != nil {
-			ctx.JSON(iris.Map{"msg": "FAIL", "info": err.Error()})
+		if id := cardAdmin.LastLoginToken(); id == "" {
+			ctx.JSON(iris.Map{"msg": "FAIL", "info": "session not created"})
 		} else {
 			appCORSHandle(ctx)
 			ctx.JSON(iris.Map{"msg": "OK", "token": id})

@@ -212,25 +212,52 @@ used for auth.
 - **Test:** after a simulated login, confirm `sessions` + `loginlog` rows exist
   and `SessionGet` returns correct role.
 
-### Stage 3 — Wire login to new user store (replace `CheckAdminLogin` usage)
+### Stage 3 — Wire login to new user store (replace `CheckAdminLogin` usage) — DONE
 **Goal:** `AdminIn` verifies against `users`; creates session + loginlog;
-bootstrap `admin/123456` path with forced pw change.
-- Update `AdminIn` (card_admin.go) to use `UserGetByUsername`+`UserVerify`.
-- On success: `SessionCreate` + `LoginLogAppend`; set iris cookie = token.
-- Bootstrap: if `users` empty and legacy `admin/123456` matches → mark
-  "must change password", create first `users` row on pw change, disable legacy
-  fallback.
-- Update `verifyApiLogin` similarly (returns `token`).
-- **Test:** log in as `admin/123456` → forced to change pw → real account
-  created; legacy pair no longer works. Log in as a created user.
+bootstrap `admin/123456` path.
+- Update `AdminIn` (card_admin.go) to use `UserGetByUsername`+`UserVerify`
+  (extracted to `adminLoginCore` for testability). On success: `UserLoginNew`
+  (writes `sessions` + `loginlog`), sets iris cookie = token.
+- Bootstrap: if `users` empty and legacy `cardDB.CheckAdminLogin` matches the
+  default admin/123456 → seed the first `users` row (role=admin) computed from
+  the provided password, then create session. After seeding, subsequent logins
+  use the new store only (legacy fallback no longer triggered).
+- `CardAdmin` gains `userDB` field + `MakeUserAdmin(dbpath)` (called in
+  `MakeAdminPage`) + exported `AttachUserDB` (tests). `AdminIn` keeps its
+  `int` return; a `lastToken` field + `LastLoginToken()` exposes the token to
+  `verifyApiLogin`. `AdminCheck` now reads the session token from the cookie.
+- `verifyApiLogin` returns the token from `LastLoginToken()` instead of
+  `cardDB.OnLoginUser()`.
+- `checkAdminVerify` resolves API tokens via `cardAdmin.UserSessionTimeout`
+  (new store); role enforcement still deferred to Stage 4.
+- **Test:** `TestStage3AdminLogin` (card_test package, HTTP) — operator logs in
+  via new store (session + loginlog written); empty-store bootstrap with
+  admin/123456 seeds first admin, legacy `CheckAdminLogin` called exactly once
+  (proving fallback disabled after bootstrap). PASS.
+- **Deferred (to Stage 5/6):** the *forced password-change redirect* after the
+  bootstrap login. Stage 3 seeds the account and disables the legacy fallback,
+  but the UI redirect that blocks the admin until they change the password is
+  implemented in Stage 6 (security page) — noted so it is not forgotten.
 
-### Stage 4 — Role-based authorization in `checkAdminVerify`
+### Stage 4 — Role-based authorization in `checkAdminVerify` — DONE
 **Goal:** operator blocked from non-allowed endpoints; admin unchanged.
-- Extend `checkAdminVerify` to resolve token → `{userID, username, role}`.
-- Enforce: operator allowed = `cardwrite`, `modellist`, `modelsearch`,
-  `cardsearch`; else `NotFound()`.
-- **Test:** login as operator → allowed endpoints work, others return 404;
-  login as admin → all work.
+- Added `UserRoleOfToken(token)` and `UserRoleInCtx(ctx)` to `card.CardAdmin`
+  (card_admin.go): resolves the account role from the API token / GUI session.
+- Rewrote `checkAdminVerify` (server_admin.go):
+  - API `X-token` path: still restricted to the whitelisted
+    `/verify/api/{modellist,cardwrite,cardsearch}` routes (operator scope);
+    invalid/expired token → `NotFound()`.
+  - GUI cookie path: after `AdminCheck` passes, resolve the session role via
+    `UserRoleInCtx`; operators are denied admin GUI pages (`NotFound()`),
+    admins pass through. Operator data endpoints remain reachable via the API
+    path above.
+- **Test:** `TestStage4RoleAuthz` (server package, HTTP). Verifies:
+  - admin cookie client → GUI page 200;
+  - operator cookie client → GUI page 404;
+  - admin/operator API token (X-token) on `/verify/api/cardwrite` → 200;
+  - bogus API token → 404. PASS.
+- Existing Stage 1/2/3 tests (`TestUserDBStage1`, `TestStage3AdminLogin`) still
+  PASS (no regression).
 
 ### Stage 5 — Password & role change + admin-count guard + rotation
 **Goal:** users change own pw; admin changes roles; rotation on change.

@@ -108,6 +108,7 @@ func (u *AppSession) ChangeTime(update, remove time.Duration) error {
 
 func MakeAdminPage(app *iris.Application) {
 	cardAdmin = card.MakeCardAdmin(hostname, dbPath)
+	cardAdmin.MakeUserAdmin(dbPath)
 
 	tmpl := iris.HTML(dbPath+"/html", ".html")
 	tmpl.AddFunc("html", func(text string) template.HTML {
@@ -150,7 +151,7 @@ func checkAdminVerify(ctx iris.Context) {
 			ctx.NotFound()
 			return
 		}
-		if curTimeout, err := cardDB.CheckLoginSession(token); err != nil {
+		if curTimeout, err := cardAdmin.UserSessionTimeout(token); err != nil {
 			ctx.NotFound()
 		} else {
 			AppSess.Update(token, curTimeout)
@@ -159,6 +160,12 @@ func checkAdminVerify(ctx iris.Context) {
 		return
 	}
 	if ret := cardAdmin.AdminCheck(ctx); ret != card.SessionPassed {
+		ctx.NotFound()
+		return
+	}
+	// Stage 4: GUI admin pages are admin-only. Operators (who may only use the
+	// /verify/api/... data endpoints) are denied access to the admin GUI.
+	if role, ok := cardAdmin.UserRoleInCtx(ctx); !ok || role != card.RoleAdmin {
 		ctx.NotFound()
 		return
 	}
