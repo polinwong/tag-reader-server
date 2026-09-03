@@ -186,6 +186,83 @@ verification paths.
       - Only newly-created/replaced session rows are affected; `users`,
         `loginlog`, `rec`/`salt`, and `carddata.db` are never touched.
 
+## 12. Staged implementation task list (incremental testing)
+
+Each stage is independently buildable and testable. We pause to test before
+moving to the next stage. No stage modifies existing `rec`/`salt` or
+`carddata.db` data.
+
+### Stage 1 — New user database & core data layer (no auth change yet)
+**Goal:** `userdb.db` opens with the three buckets and basic CRUD works.
+- Add `CreateUserDB`/`makeDB` opening `local/userdb.db`.
+- Add `UserAdd(userID, username, rec, salt, role)`.
+- Add `UserGetByUsername(username)` (scan `users` bucket).
+- Add `UserVerify(username, pw)` using `genPWHashWithSalt`.
+- Add `CountAdmins`.
+- **Test:** unit test / small helper: create a user, verify login, count admins.
+  Existing `admin.db` login path still works unchanged.
+
+### Stage 2 — Sessions & login log in the new DB
+**Goal:** session + history written to `userdb.db`; old `admin-record` no longer
+used for auth.
+- Add `SessionCreate(token, userID, username, role, loginTime)`.
+- Add `SessionGet(token)` → `{userID, username, role}`.
+- Add `SessionDelete(token)`.
+- Add `LoginLogAppend(...)` and `LoginLogList()`.
+- **Test:** after a simulated login, confirm `sessions` + `loginlog` rows exist
+  and `SessionGet` returns correct role.
+
+### Stage 3 — Wire login to new user store (replace `CheckAdminLogin` usage)
+**Goal:** `AdminIn` verifies against `users`; creates session + loginlog;
+bootstrap `admin/123456` path with forced pw change.
+- Update `AdminIn` (card_admin.go) to use `UserGetByUsername`+`UserVerify`.
+- On success: `SessionCreate` + `LoginLogAppend`; set iris cookie = token.
+- Bootstrap: if `users` empty and legacy `admin/123456` matches → mark
+  "must change password", create first `users` row on pw change, disable legacy
+  fallback.
+- Update `verifyApiLogin` similarly (returns `token`).
+- **Test:** log in as `admin/123456` → forced to change pw → real account
+  created; legacy pair no longer works. Log in as a created user.
+
+### Stage 4 — Role-based authorization in `checkAdminVerify`
+**Goal:** operator blocked from non-allowed endpoints; admin unchanged.
+- Extend `checkAdminVerify` to resolve token → `{userID, username, role}`.
+- Enforce: operator allowed = `cardwrite`, `modellist`, `modelsearch`,
+  `cardsearch`; else `NotFound()`.
+- **Test:** login as operator → allowed endpoints work, others return 404;
+  login as admin → all work.
+
+### Stage 5 — Password & role change + admin-count guard + rotation
+**Goal:** users change own pw; admin changes roles; rotation on change.
+- `UserChangePW` (recompute `rec`/`salt`); `UserChangeRole` (admin-only, with
+  `CountAdmins` guard).
+- On pw/role change: delete old `sessions[token]`, issue new token.
+- **Test:** operator changes own pw → old token expires; admin demotes self/
+  other → advanced access lost immediately; cannot remove last admin.
+
+### Stage 6 — Admin security page UI (role selector + show/hide toggle)
+**Goal:** usable management UI.
+- Add role radio (`admin`/`operator`) shown only for admins; hidden for
+  operators.
+- Add show/hide password toggle icon on all password fields.
+- Admin-only endpoint applies role change.
+- **Test:** admin sees + uses role selector; operator does not; toggle works.
+
+### Stage 7 — Logout invalidation + login-history view
+**Goal:** logout truly ends session; history view shows full log.
+- `adminLogout` deletes `sessions[token]` (keep iris cookie destroy).
+- Repoint `getLoginRecord` to `loginlog` (full history) + add view.
+- **Test:** after logout, old token rejected; history lists all logins with
+  user + time.
+
+### Stage 8 — Final verification & acceptance checklist
+- Run Section 11 checklist end to end.
+- Confirm existing `admin.db` `rec`/`salt` + `carddata.db` untouched on disk.
+- Confirm no client changes needed.
+
+**Testing gates:** after Stages 1, 2, 3, 4, 5, 6, 7 we pause for a test pass
+before continuing. Stage 8 is the final gate.
+
 ## 11. Acceptance checklist (target)
 
 - [ ] Multiple admins and operators can each log in with their own password.
