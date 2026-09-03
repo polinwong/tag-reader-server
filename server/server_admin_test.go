@@ -42,7 +42,16 @@ func makeHttpTest(t *testing.T) (
 	}
 
 	app := iris.New()
-	server.SetDbPath("../local")
+	// Isolate the on-disk user store so the real ../local/userdb.db is never
+	// polluted by login/bootstrap tests (which write to the user store). Views
+	// still need the real html/js/css, so symlink them into the temp dir.
+	tmp := t.TempDir()
+	for _, name := range []string{"html", "js", "css"} {
+		if abs, aerr := filepath.Abs(filepath.Join("../local", name)); aerr == nil {
+			_ = os.Symlink(abs, filepath.Join(tmp, name))
+		}
+	}
+	server.SetDbPath(tmp)
 	server.MakeAdminPage(app)
 	server.MakeCardPage(app)
 	exp = httptest.New(t, app, httptest.URL("http://test.com"))

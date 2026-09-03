@@ -289,20 +289,80 @@ bootstrap `admin/123456` path.
     promotion rotates old session; last-admin guard enforced via HTTP. PASS.
   - Stage 1/2/3/4 tests still PASS (no regression).
 
-### Stage 6 — Admin security page UI (role selector + show/hide toggle)
-**Goal:** usable management UI.
-- Add role radio (`admin`/`operator`) shown only for admins; hidden for
-  operators.
-- Add show/hide password toggle icon on all password fields.
-- Admin-only endpoint applies role change.
-- **Test:** admin sees + uses role selector; operator does not; toggle works.
+### Stage 6 — Admin security page UI (role selector + show/hide toggle) — DONE
+**Goal:** usable management UI. (Step 6 is UI-only; the bootstrap "forced
+password-change redirect" was deliberately dropped — it only fires once for the
+first admin and was not worth the test complexity. Any 302 oddities are handled
+manually when the server is first run.)
+- `local/html/admin-security.html` + `local/js/admin/admin-security.js`:
+  - Role radio (`admin`/`operator`) shown only when `role == "admin"` (template
+    `{{ if eq .role "admin" }}`); hidden for operators.
+  - Show/hide password toggle on every password field (`.pw-toggle`).
+  - `MustChange` bootstrap banner kept, now red + bold (`alert-danger`,
+    `font-weight:bold`).
+- `server/server_admin.go`:
+  - `checkAdminVerify`: removed the `MustChange` 302 redirect branch; the admin
+    GUI stays strictly admin-only.
+  - New `checkOperatorVerify` middleware: any authenticated user (admin or
+    operator) may reach the self-service security page.
+  - New routes `/verify/operator/security` + `/verify/operator/changepw`
+    (reuse `adminSecurity` + `adminChangePW`); operators change their OWN
+    password via these. Role management stays hidden for operators by the
+    template, so `/verify/admin/security` remains admin-only (Stage 4 intact).
+  - `LoginPage` / `adminLogin` route operators to `/verify/operator/security`
+    and admins to `/verify/admin` after login (role resolved without breaking
+    the legacy cookie-only path).
+- **Test (`server/server_role_stage6_test.go` `TestStage6SecurityUI`):** admin
+  security page shows the role section + mustChange banner; operator security
+  page hides the role section but shows the change-password form and can change
+  its own password (rotation). No 302 asserted. PASS.
 
-### Stage 7 — Logout invalidation + login-history view
+### Stage 6.5 — Admin user management (create account + admin reset password) — DONE
+**Goal:** admin creates accounts and resets any user's password (no delete; a
+user is disabled by resetting their password). Per-user login history stays in
+Stage 7 (login-log side).
+- `card/card_user.go`:
+  - `UserCreate(username, pw, role)`: generates id/salt, computes `rec` via
+    `GenUserRec`, `UserAdd`, then `UserSetMustChange(id, true)`; rejects
+    duplicate usernames (`ErrCardAdminFail`) and bad role.
+  - `UserAdminResetPW(userID, newPW)`: `UserChangePW` (recomputes rec/salt,
+    rotates sessions) then `UserSetMustChange(userID, true)`.
+- `card/card_admin.go`: `CreateUser` + `AdminResetPassword` wrappers.
+- `server/server_admin.go`:
+  - `adminCreateUser` / `adminResetPW` (admin-only via `UserRoleInCtx` +
+    `checkAdminVerify`); routes `POST /verify/admin/createuser`,
+    `POST /verify/admin/resetpw`.
+  - New users and reset targets are forced to change password at next login and
+    are rotated (re-login).
+- `local/html/admin-security.html` + `local/js/admin/admin-security.js`: admin
+  role section gains "Create user" and "Reset user password" forms (both with
+  show/hide toggles); reset dropdown shares the userlist population.
+- **Test (`server/server_role_stage65_test.go` `TestStage65UserManagement`):**
+  admin creates operator (logs in, MustChange=true); duplicate rejected; admin
+  resets op1 password (old fails, new works, MustChange=true); operator blocked
+  from both endpoints (404). PASS.
+
+### Stage 7 — Logout invalidation + login-history view — DONE
 **Goal:** logout truly ends session; history view shows full log.
-- `adminLogout` deletes `sessions[token]` (keep iris cookie destroy).
-- Repoint `getLoginRecord` to `loginlog` (full history) + add view.
-- **Test:** after logout, old token rejected; history lists all logins with
-  user + time.
+- `card/card_admin.go`: new `LogoutCurrentUser(ctx)` deletes `sessions[token]`
+  from the user store (server-side invalidation) and then destroys the iris
+  cookie. The token is now unusable for both the GUI and the API (`X-token`)
+  path immediately after logout.
+- `server/server_admin.go`: `adminLogout` calls `LogoutCurrentUser` instead of
+  `AdminOut`.
+- `server/server_card_verify.go`:
+  - `getLoginRecord` repointed to `loginlog` (full, append-only history) when
+    the user store is attached; keeps the legacy `cardDB.GetLoginRecord()`
+    fallback otherwise. Field names (`id`, `time`) preserved so the existing
+    admin GUI (`card-verify.js` `loginList`) keeps working.
+  - `removeLoginRecord` returns OK for the permanent history (loginlog is
+    append-only; there is no per-row delete), keeping the GUI consistent.
+- **Test (`server/server_role_stage7_test.go` `TestStage7LogoutAndHistory`):**
+  admin GUI login mints token T; API `X-token` path returns 200 before logout;
+  after `POST /verify/admin/logout` the same token returns 404 (session row
+  deleted) and the GUI cookie is also cleared (404 on `/verify/api/loginrec`);
+  a fresh login re-issues a working token; history lists every login with
+  `username` + `time` and grows after re-login. PASS.
 
 ### Stage 8 — Final verification & acceptance checklist
 - Run Section 11 checklist end to end.

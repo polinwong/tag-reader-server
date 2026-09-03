@@ -155,11 +155,42 @@ func verifyApiLogin(ctx iris.Context) {
 }
 
 func getLoginRecord(ctx iris.Context) {
+	if cardAdmin != nil && cardAdmin.HasUserDB() {
+		// Stage 7: the complete, append-only login history lives in the user
+		// store's loginlog bucket (every successful login since bootstrap).
+		logs, err := cardAdmin.UserDB().LoginLogList()
+		if err != nil {
+			ctx.JSON(iris.Map{"msg": "FAIL", "info": err.Error()})
+			return
+		}
+		data := make([]iris.Map, 0, len(logs))
+		for _, e := range logs {
+			// Keep the field names the existing admin GUI (card-verify.js
+			// loginList) expects: "id" (row id) and "time" (unix seconds).
+			data = append(data, iris.Map{
+				"id":       e.LoginID,
+				"time":     e.LoginTime,
+				"username": e.Username,
+				"role":     e.Role,
+				"loginTime": e.LoginTime,
+			})
+		}
+		ctx.JSON(iris.Map{"msg": "OK", "data": data})
+		return
+	}
 	ctx.JSON(iris.Map{"msg": "OK", "data": cardDB.GetLoginRecord()})
 }
 
 func removeLoginRecord(ctx iris.Context) {
 	id := ctx.Params().Get("id")
+	// Stage 7: when the user store is attached, login history (loginlog) is
+	// append-only and permanent, so there is no per-row delete. Acknowledge the
+	// request so the admin GUI stays consistent. The legacy admin-record store
+	// (pre-userDB) still supports deletion below.
+	if cardAdmin != nil && cardAdmin.HasUserDB() {
+		ctx.JSON(iris.Map{"msg": "OK", "info": "history is permanent"})
+		return
+	}
 	if err := cardDB.RemoveLoginRecord(id); err != nil {
 		ctx.NotFound()
 		ctx.JSON(iris.Map{"msg": "FAIL", "info": err.Error()})

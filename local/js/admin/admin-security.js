@@ -6,17 +6,20 @@
 $(document).ready(function () {
   $("#changebtn").on('click', onChangeClicked);
   $("#rolebtn").on('click', onRoleClicked);
+  $("#createbtn").on('click', onCreateClicked);
+  $("#resetbtn").on('click', onResetClicked);
 
-  // Show/hide password toggles.
-  $(".pw-toggle").on('click', function () {
-    const targetId = $(this).data('target');
+  // Show/hide password toggles (event delegation so dynamically added toggles work too).
+  $(document).on('click', '.pw-toggle', function (e) {
+    e.preventDefault();
+    const targetId = $(e.currentTarget).data('target');
     const inp = $("#" + targetId);
     if (inp.attr('type') === 'password') {
       inp.attr('type', 'text');
-      $(this).text('Hide');
+      $(e.currentTarget).text('Hide');
     } else {
       inp.attr('type', 'password');
-      $(this).text('Show');
+      $(e.currentTarget).text('Show');
     }
   });
 
@@ -30,20 +33,33 @@ function loadUsers() {
   $.getJSON("/verify/admin/userlist")
     .done(ret => {
       if (ret.msg !== "OK") {
+        const info = ret.info || "unknown error";
+        console.error("userlist failed:", info);
+        $("#alertPlace").append(getAlert(false, "User list failed: " + info));
         return;
       }
       const sel = $("#userSelect");
+      const rsel = $("#resetUserSelect");
       sel.empty();
+      rsel.empty();
       ret.users.forEach(u => {
+        const label = u.username + " (" + u.role + ")";
         sel.append($('<option></option>')
           .attr('value', u.id)
-          .text(u.username + " (" + u.role + ")")
+          .text(label)
           .data('role', u.role));
+        rsel.append($('<option></option>')
+          .attr('value', u.id)
+          .text(label));
       });
       syncRoleRadios();
       sel.off('change').on('change', syncRoleRadios);
     })
-    .fail(() => {/* non-admin: section absent */});
+    .fail((jqXHR, textStatus, errorThrown) => {
+      const info = (jqXHR.responseJSON && jqXHR.responseJSON.info) ? jqXHR.responseJSON.info : textStatus;
+      console.error("userlist request failed:", info);
+      $("#alertPlace").append(getAlert(false, "User list failed: " + info));
+    });
 }
 
 function syncRoleRadios() {
@@ -59,9 +75,7 @@ function onChangeClicked(e) {
   e.preventDefault();
 
   var data = {
-    orgid: $("#orgid").val(),
     orgpw: $("#orgpw").val(),
-    changeid: $("#changeid").val(),
     changepw: $("#changepw").val(),
     changepw2: $("#changepw2").val(),
   };
@@ -69,9 +83,7 @@ function onChangeClicked(e) {
   let alert = $("#alertPlace");
   alert.empty();
   if (
-    data.orgid.length == 0 ||
     data.orgpw.length == 0 ||
-    data.changeid.length == 0 ||
     data.changepw.length == 0 ||
     data.changepw2.length == 0
   ) {
@@ -114,6 +126,61 @@ function onRoleClicked(e) {
     })
     .catch(res => {
       alert.append(getAlert(false, "Update fail: " + (res.responseJSON && res.responseJSON.info)));
+    });
+}
+
+function onCreateClicked(e) {
+  e.preventDefault();
+  const data = {
+    username: $("#newUsername").val(),
+    newpw: $("#newUserpw").val(),
+    role: $("input[name='createRoleRadios']:checked").val(),
+  };
+  let alert = $("#alertPlace");
+  alert.empty();
+  if (!data.username || !data.newpw || !data.role) {
+    alert.append(getAlert(false, "Create fail: fill username, password and role"));
+    return;
+  }
+  $.post("/verify/admin/createuser", data)
+    .done(ret => {
+      if (ret.msg == "OK") {
+        alert.append(getAlert(true, "User created."));
+        loadUsers();
+        $("#newUsername").val("");
+        $("#newUserpw").val("");
+      } else {
+        alert.append(getAlert(false, "Create fail: " + ret.info));
+      }
+    })
+    .catch(res => {
+      alert.append(getAlert(false, "Create fail: " + (res.responseJSON && res.responseJSON.info)));
+    });
+}
+
+function onResetClicked(e) {
+  e.preventDefault();
+  const data = {
+    userid: $("#resetUserSelect").val(),
+    newpw: $("#resetpw").val(),
+  };
+  let alert = $("#alertPlace");
+  alert.empty();
+  if (!data.userid || !data.newpw) {
+    alert.append(getAlert(false, "Reset fail: select a user and enter a password"));
+    return;
+  }
+  $.post("/verify/admin/resetpw", data)
+    .done(ret => {
+      if (ret.msg == "OK") {
+        alert.append(getAlert(true, "Password reset. User must log in again."));
+        $("#resetpw").val("");
+      } else {
+        alert.append(getAlert(false, "Reset fail: " + ret.info));
+      }
+    })
+    .catch(res => {
+      alert.append(getAlert(false, "Reset fail: " + (res.responseJSON && res.responseJSON.info)));
     });
 }
 

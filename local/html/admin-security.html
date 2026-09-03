@@ -10,40 +10,28 @@ Creater: Kevin Mak, October 2021
 <div class="container-sm pt-3">
   <h1>Security page</h1>
 
-  {{ if .mustChange }}
-  <div class="alert alert-warning" role="alert">
-    You are using the default bootstrap credentials. Please change your password
-    before continuing.
+  {{ if and .mustChange .isBootstrap }}
+  <div class="alert alert-danger" role="alert" style="font-weight:bold; font-size:1.1rem;">
+    <strong>You are using the default bootstrap credentials. Please change your password before continuing.</strong>
   </div>
   {{ end }}
 
   <h4 class="pt-3">Change password</h4>
-  <form>
+  <p>Changing password for: <strong>{{ .username }}</strong></p>
+  <form id="changeForm" autocomplete="off">
     <div class="form-group">
-      <label for="orgid">Original User</label>
-      <input type="text"
-        class="form-control" name="inorgid" id="orgid" aria-describedby="helpId1" placeholder="">
-      <small id="helpId1" class="form-text text-muted">Input the user name</small>
-    </div>
-    <div class="form-group">
-      <label for="orgpw">Original password</label>
+      <label for="orgpw">Current password</label>
       <div class="input-group">
-        <input type="password" class="form-control" name="inorgpw" id="orgpw" placeholder="">
+        <input type="password" class="form-control" name="inorgpw" id="orgpw" autocomplete="off" placeholder="">
         <div class="input-group-append">
           <button type="button" class="btn btn-outline-secondary pw-toggle" data-target="orgpw">Show</button>
         </div>
       </div>
     </div>
     <div class="form-group">
-      <label for="loginid">New user</label>
-      <input type="text"
-        class="form-control" name="inid" id="changeid" aria-describedby="helpId2" placeholder="">
-      <small id="helpId2" class="form-text text-muted">New user name</small>
-    </div>
-    <div class="form-group">
       <label for="changepw">New password</label>
       <div class="input-group">
-        <input type="password" class="form-control" name="inpw" id="changepw" placeholder="">
+        <input type="password" class="form-control" name="inpw" id="changepw" autocomplete="new-password" placeholder="">
         <div class="input-group-append">
           <button type="button" class="btn btn-outline-secondary pw-toggle" data-target="changepw">Show</button>
         </div>
@@ -52,7 +40,7 @@ Creater: Kevin Mak, October 2021
     <div class="form-group">
       <label for="changepw2">Repeat new password</label>
       <div class="input-group">
-        <input type="password" class="form-control" name="inpw2" id="changepw2" placeholder="">
+        <input type="password" class="form-control" name="inpw2" id="changepw2" autocomplete="new-password" placeholder="">
         <div class="input-group-append">
           <button type="button" class="btn btn-outline-secondary pw-toggle" data-target="changepw2">Show</button>
         </div>
@@ -80,6 +68,54 @@ Creater: Kevin Mak, October 2021
       </div>
     </div>
     <button id="rolebtn" type="submit" class="btn btn-primary">Update role</button>
+  </form>
+
+  <h4 class="pt-5">Create user</h4>
+  <p class="text-muted">New accounts must change their password at first login.</p>
+  <form id="createForm" autocomplete="off">
+    <div class="form-group">
+      <label for="newUsername">Username</label>
+      <input type="text" class="form-control" id="newUsername" autocomplete="off" placeholder="">
+    </div>
+    <div class="form-group">
+      <label for="newUserpw">Initial password</label>
+      <div class="input-group">
+        <input type="password" class="form-control" id="newUserpw" autocomplete="new-password" placeholder="">
+        <div class="input-group-append">
+          <button type="button" class="btn btn-outline-secondary pw-toggle" data-target="newUserpw">Show</button>
+        </div>
+      </div>
+    </div>
+    <div class="form-group">
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="radio" name="createRoleRadios" id="createAdmin" value="admin">
+        <label class="form-check-label" for="createAdmin">Admin</label>
+      </div>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="radio" name="createRoleRadios" id="createOperator" value="operator">
+        <label class="form-check-label" for="createOperator">Operator</label>
+      </div>
+    </div>
+    <button id="createbtn" type="submit" class="btn btn-primary">Create user</button>
+  </form>
+
+  <h4 class="pt-5">Reset user password</h4>
+  <p class="text-muted">Select a user and set a new password; they must change it at next login.</p>
+  <form id="resetForm" autocomplete="off">
+    <div class="form-group">
+      <label for="resetUserSelect">User</label>
+      <select class="form-control" id="resetUserSelect"></select>
+    </div>
+    <div class="form-group">
+      <label for="resetpw">New password</label>
+      <div class="input-group">
+        <input type="password" class="form-control" id="resetpw" autocomplete="new-password" placeholder="">
+        <div class="input-group-append">
+          <button type="button" class="btn btn-outline-secondary pw-toggle" data-target="resetpw">Show</button>
+        </div>
+      </div>
+    </div>
+    <button id="resetbtn" type="submit" class="btn btn-primary">Reset password</button>
   </form>
   {{ end }}
 </div>

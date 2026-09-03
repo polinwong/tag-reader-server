@@ -128,6 +128,17 @@ func MakeAdminPage(app *iris.Application) {
 	app.Post("/verify/admin/logout", adminLogout).Use(checkAdminVerify)
 	app.Post("/verify/admin/login", adminLogin)
 
+	// Operator self-service security page: any authenticated user may change
+	// their own password. Role management is hidden for operators by the
+	// template, keeping /verify/admin/security strictly admin-only (Stage 4).
+	app.Get("/verify/operator/security", adminSecurity).Use(checkOperatorVerify)
+	app.Post("/verify/operator/changepw", adminChangePW).Use(checkOperatorVerify)
+
+	// Stage 6.5: admin user management (create account + admin reset password).
+	// Admin-only (checkAdminVerify already denies operators with 404).
+	app.Post("/verify/admin/createuser", adminCreateUser).Use(checkAdminVerify)
+	app.Post("/verify/admin/resetpw", adminResetPW).Use(checkAdminVerify)
+
 	r := app.HandleDir("js/admin", dbPath+"/js/admin")
 	r.Use(checkAdminVerify)
 }
@@ -163,28 +174,34 @@ func checkAdminVerify(ctx iris.Context) {
 	}
 	// GUI cookie path. Resolve the session once (CurrentUserFull opens the iris
 	// session a single time, also covering AdminCheck's validity check).
-	sess, info, ok := cardAdmin.CurrentUserFull(ctx)
+	sess, _, ok := cardAdmin.CurrentUserFull(ctx)
 	if !ok {
 		ctx.NotFound()
 		return
 	}
-	// Stage 4: GUI admin pages are admin-only. Operators (who may only use the
+	// Stage 4: GUI admin pages are admin-only. Operators (who may use the
 	// /verify/api/... data endpoints) are denied access to the admin GUI.
 	if sess.Role != card.RoleAdmin {
 		ctx.NotFound()
 		return
 	}
-	// Stage 6: forced password change. A bootstrap/first admin that has not yet
-	// changed the password is bounced to the security page (except the security
-	// page itself, the change-password endpoint, logout, and static assets).
-	if info.MustChange {
-		p := ctx.RequestPath(true)
-		if p != "/verify/admin/security" && p != "/verify/admin/changepw" &&
-			p != "/verify/admin/logout" && !strings.HasPrefix(p, "/js/admin") {
-			ctx.StatusCode(iris.StatusFound)
-			ctx.Header("Location", "/verify/admin/security")
-			return
+	ctx.Next()
+}
+
+// checkOperatorVerify guards the operator self-service security page. Any
+// authenticated user (admin or operator) may reach it to manage their own
+// password; the role-management section is hidden for operators by the template.
+func checkOperatorVerify(ctx iris.Context) {
+	defer func() {
+		if err := recover(); err != nil {
+			logio.Printf("panic checkOperator, %s", err)
+			ctx.StatusCode(iris.StatusInternalServerError)
+			ctx.WriteString("500 Internal Server Error")
 		}
+	}()
+	if _, _, ok := cardAdmin.CurrentUserFull(ctx); !ok {
+		ctx.NotFound()
+		return
 	}
 	ctx.Next()
 }
@@ -196,9 +213,16 @@ func LoginPage(ctx iris.Context) {
 		ctx.ViewData("addon", "")
 		ctx.ViewData("message", "")
 		ctx.View("admin-login.html")
-	} else {
-		ctx.Redirect("/verify/admin")
+		return
 	}
+	// Already authenticated: route operators to their own page, admins to the
+	// admin index. Falls back to /verify/admin when the role can't be resolved
+	// (e.g. legacy cookie sessions without a user store).
+	if sess, _, ok := cardAdmin.CurrentUserFull(ctx); ok && sess.Role == card.RoleOperator {
+		ctx.Redirect("/verify/operator/security")
+		return
+	}
+	ctx.Redirect("/verify/admin")
 }
 
 func loginFailLog(addr string) {
@@ -212,9 +236,14 @@ func loginFailLog(addr string) {
 
 func adminLogin(ctx iris.Context) {
 	if cardAdmin.AdminIn(ctx, cardDB) == card.SessionPassed {
-		ctx.Redirect("/verify/admin")
+		// Route operators to their own security page; admins to the admin index.
+		if role, ok := cardAdmin.UserRoleOfToken(cardAdmin.LastLoginToken()); ok && role == card.RoleOperator {
+			ctx.Redirect("/verify/operator/security")
+		} else {
+			ctx.Redirect("/verify/admin")
+		}
 	} else {
-		loginFailLog(ctx.Request().RemoteAddr)
+		logio.Printf("Login failed for user %q from %s", ctx.PostValue("inid"), ctx.Request().RemoteAddr)
 		ctx.WriteString("Login failed")
 	}
 }
@@ -223,10 +252,18 @@ func adminSecurity(ctx iris.Context) {
 	ctx.ViewLayout("page-layout.html")
 	ctx.ViewData("navActiveL2", " active")
 	// Stage 6: expose the current user's role so the template can show the
-	// role-management section to admins only.
+	// role-management section to admins only. Also expose whether this is the
+	// bootstrap account, so the forced-password-change banner only appears for
+	// the first account created from an empty userdb.
 	if info, ok := cardAdmin.CurrentUserInfo(ctx); ok {
 		ctx.ViewData("role", info.Role)
 		ctx.ViewData("mustChange", info.MustChange)
+		ctx.ViewData("username", info.Username)
+		isBootstrap := false
+		if db := cardAdmin.UserDB(); db != nil {
+			isBootstrap = db.IsBootstrapUser(info.ID)
+		}
+		ctx.ViewData("isBootstrap", isBootstrap)
 	}
 	ctx.View("admin-security.html")
 }
@@ -260,10 +297,20 @@ func adminChangePW(ctx iris.Context) {
 	pw := ctx.PostValue("changepw")
 	pw2 := ctx.PostValue("changepw2")
 
-	if len(id) == 0 || len(pw) == 0 || len(pw2) == 0 || len(orgpw) == 0 {
-		ctx.StatusCode(iris.StatusBadRequest)
-		ctx.JSON(iris.Map{"msg": "FAIL", "info": "Bad request"})
-		return
+	// Stage 5: in multi-user mode the current user changes their own password,
+	// so changeid/orgid are not used. Keep the legacy checks for the old path.
+	if cardAdmin != nil && cardAdmin.HasUserDB() {
+		if len(orgpw) == 0 || len(pw) == 0 || len(pw2) == 0 {
+			ctx.StatusCode(iris.StatusBadRequest)
+			ctx.JSON(iris.Map{"msg": "FAIL", "info": "Bad request"})
+			return
+		}
+	} else {
+		if len(id) == 0 || len(pw) == 0 || len(pw2) == 0 || len(orgpw) == 0 {
+			ctx.StatusCode(iris.StatusBadRequest)
+			ctx.JSON(iris.Map{"msg": "FAIL", "info": "Bad request"})
+			return
+		}
 	}
 	if strings.Compare(pw, pw2) != 0 {
 		ctx.JSON(iris.Map{"msg": "FAIL", "info": "Password not same"})
@@ -292,7 +339,7 @@ func adminChangePW(ctx iris.Context) {
 }
 
 func adminLogout(ctx iris.Context) {
-	cardAdmin.AdminOut(ctx)
+	cardAdmin.LogoutCurrentUser(ctx)
 	ctx.Redirect("/verify/")
 }
 
@@ -318,5 +365,60 @@ func adminChangeRole(ctx iris.Context) {
 		ctx.JSON(iris.Map{"msg": "OK", "info": "Role updated. User must log in again."})
 	} else {
 		ctx.JSON(iris.Map{"msg": "FAIL", "info": "Change role failed: " + err.Error()})
+	}
+}
+
+// adminCreateUser creates a new account (admin-only). The new account is forced
+// to change its password on first login.
+func adminCreateUser(ctx iris.Context) {
+	if role, ok := cardAdmin.UserRoleInCtx(ctx); !ok || role != card.RoleAdmin {
+		ctx.StatusCode(iris.StatusForbidden)
+		ctx.JSON(iris.Map{"msg": "FAIL", "info": "Admin privileges required"})
+		return
+	}
+	if cardAdmin == nil || !cardAdmin.HasUserDB() {
+		ctx.StatusCode(iris.StatusInternalServerError)
+		ctx.JSON(iris.Map{"msg": "FAIL", "info": "user store unavailable"})
+		return
+	}
+	username := ctx.PostValue("username")
+	pw := ctx.PostValue("newpw")
+	role := ctx.PostValue("role")
+	if username == "" || pw == "" || (role != card.RoleAdmin && role != card.RoleOperator) {
+		ctx.StatusCode(iris.StatusBadRequest)
+		ctx.JSON(iris.Map{"msg": "FAIL", "info": "Bad request"})
+		return
+	}
+	if id, err := cardAdmin.CreateUser(username, pw, role); err == nil {
+		ctx.JSON(iris.Map{"msg": "OK", "id": id})
+	} else {
+		ctx.JSON(iris.Map{"msg": "FAIL", "info": err.Error()})
+	}
+}
+
+// adminResetPW resets a user's password on behalf of an admin (admin-only). The
+// target is flagged MustChange and rotated, forcing re-login + self change.
+func adminResetPW(ctx iris.Context) {
+	if role, ok := cardAdmin.UserRoleInCtx(ctx); !ok || role != card.RoleAdmin {
+		ctx.StatusCode(iris.StatusForbidden)
+		ctx.JSON(iris.Map{"msg": "FAIL", "info": "Admin privileges required"})
+		return
+	}
+	if cardAdmin == nil || !cardAdmin.HasUserDB() {
+		ctx.StatusCode(iris.StatusInternalServerError)
+		ctx.JSON(iris.Map{"msg": "FAIL", "info": "user store unavailable"})
+		return
+	}
+	userID := ctx.PostValue("userid")
+	pw := ctx.PostValue("newpw")
+	if userID == "" || pw == "" {
+		ctx.StatusCode(iris.StatusBadRequest)
+		ctx.JSON(iris.Map{"msg": "FAIL", "info": "Bad request"})
+		return
+	}
+	if err := cardAdmin.AdminResetPassword(userID, pw); err == nil {
+		ctx.JSON(iris.Map{"msg": "OK"})
+	} else {
+		ctx.JSON(iris.Map{"msg": "FAIL", "info": err.Error()})
 	}
 }

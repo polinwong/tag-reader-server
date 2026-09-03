@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path"
@@ -117,7 +118,11 @@ func (a *CardAdmin) AttachUserDB(db *UserDatabase) {
 
 func (a *CardAdmin) openSession(ctx iris.Context) (nsess *sessions.Session) {
 	nsess = a.sess.Start(ctx, func(c *http.Cookie) {
-		c.Domain = ctx.Host() // Use wildcard domain for multiple domain access - 2024-11-29 by Kevin Mak
+		host := ctx.Host()
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		c.Domain = host // Use wildcard domain for multiple domain access - 2024-11-29 by Kevin Mak
 	})
 	return
 }
@@ -125,6 +130,24 @@ func (a *CardAdmin) openSession(ctx iris.Context) (nsess *sessions.Session) {
 // AdminOut logout user
 func (a *CardAdmin) AdminOut(ctx iris.Context) {
 	a.openSession(ctx).Destroy()
+}
+
+// LogoutCurrentUser invalidates the current user's session on the server side
+// (deletes sessions[token] from the user store) and then destroys the iris GUI
+// cookie. This makes the token unusable immediately for both the GUI and the API
+// (X-token) path (Stage 7). Without the server-side delete, the token would
+// remain valid in userdb.sessions even after the cookie was cleared.
+func (a *CardAdmin) LogoutCurrentUser(ctx iris.Context) {
+	if a.userDB != nil {
+		token := ctx.GetHeader("X-token")
+		if token == "" {
+			token = a.openSession(ctx).GetString("token")
+		}
+		if token != "" {
+			_ = a.userDB.SessionDelete(token)
+		}
+	}
+	a.AdminOut(ctx)
 }
 
 // AdminCheck check user have login (GUI cookie path).
@@ -185,6 +208,9 @@ func (a *CardAdmin) adminLoginCore(id, pw string, db ICardDB) (token string, sta
 				salt, _ := DbUUID.NewV4()
 				rec := genPWHashWithSalt(id, pw, []byte(salt.String()))
 				if aerr := a.userDB.UserAdd(id, id, rec, salt.String(), RoleAdmin); aerr == nil {
+					// Record that this is the bootstrap admin; the UI uses this to
+					// show the forced-password-change banner only for this account.
+					a.userDB.SetBootstrapUser(id)
 					// Force the bootstrap admin to change the password before
 					// using the system (Stage 6).
 					a.userDB.UserSetMustChange(id, true)
@@ -344,7 +370,11 @@ func (a *CardAdmin) ChangeOwnPassword(ctx iris.Context, oldPW, newPW string) err
 	if !a.userDB.verifyUserPW(info, oldPW) {
 		return ErrCardAdminFail
 	}
-	return a.userDB.UserChangePW(cur.UserID, newPW)
+	if err := a.userDB.UserChangePW(cur.UserID, newPW); err != nil {
+		return err
+	}
+	// Password changed successfully: clear the forced-change flag.
+	return a.userDB.UserSetMustChange(cur.UserID, false)
 }
 
 // ChangeUserRole changes the role of a target account. Admin-only enforcement is
@@ -355,6 +385,24 @@ func (a *CardAdmin) ChangeUserRole(targetUserID, newRole string) error {
 		return ErrCardDBNotExists
 	}
 	return a.userDB.UserChangeRole(targetUserID, newRole)
+}
+
+// CreateUser creates a new account (admin action). The new account is flagged
+// MustChange so the user changes the password on first login.
+func (a *CardAdmin) CreateUser(username, pw, role string) (string, error) {
+	if a.userDB == nil {
+		return "", ErrCardDBNotExists
+	}
+	return a.userDB.UserCreate(username, pw, role)
+}
+
+// AdminResetPassword sets a new password for a user without the old password
+// (admin action). The account is flagged MustChange and its sessions rotated.
+func (a *CardAdmin) AdminResetPassword(userID, newPW string) error {
+	if a.userDB == nil {
+		return ErrCardDBNotExists
+	}
+	return a.userDB.UserAdminResetPW(userID, newPW)
 }
 
 // UserSessionTimeout mirrors the legacy CheckLoginSession API for AppSess.

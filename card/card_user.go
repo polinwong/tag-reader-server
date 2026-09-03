@@ -37,6 +37,9 @@ const (
 	// Value (JSON) = { userID, username, role, loginTime }.
 	// Rows are appended on every successful login and never deleted.
 	DB_USER_LOG = "loginlog"
+
+	// DB_META is the bucket for userdb metadata (e.g. the bootstrap account ID).
+	DB_META = "meta"
 )
 
 // Role constants.
@@ -74,7 +77,7 @@ func CreateUserDB(dbpath string) (d *UserDatabase, err error) {
 		return nil, err
 	}
 	if err = userDb.Update(func(tx ITx) error {
-		for _, name := range []string{DB_USER, DB_USER_SESS, DB_USER_LOG} {
+		for _, name := range []string{DB_USER, DB_USER_SESS, DB_USER_LOG, DB_META} {
 			if _, e := tx.CreateBucketIfNotExists([]byte(name)); e != nil {
 				return e
 			}
@@ -85,7 +88,43 @@ func CreateUserDB(dbpath string) (d *UserDatabase, err error) {
 	}
 	d.userDb = userDb
 
+	// Backfill bootstrap metadata for userdb files created before the meta bucket.
+	_ = d.backfillBootstrapUser()
+
 	return d, err
+}
+
+// backfillBootstrapUser sets the bootstrap-user marker when the meta bucket is
+// empty and the users bucket contains the bootstrap account. The bootstrap
+// account was seeded with userID == username, whereas admin-created accounts use
+// UUIDs. This handles databases migrated from earlier versions where the
+// bootstrap account was not explicitly tagged.
+func (b *UserDatabase) backfillBootstrapUser() error {
+	return b.userDb.Update(func(tx ITx) error {
+		meta := tx.Bucket([]byte(DB_META))
+		users := tx.Bucket([]byte(DB_USER))
+		if meta == nil || users == nil {
+			return nil
+		}
+		if meta.Get([]byte("bootstrap-user")) != nil {
+			return nil
+		}
+		var bootstrapKey []byte
+		users.ForEach(func(k, v []byte) error {
+			var info UserInfo
+			if err := json.Unmarshal(v, &info); err != nil {
+				return nil
+			}
+			if info.ID == info.Username {
+				bootstrapKey = append([]byte(nil), k...)
+			}
+			return nil
+		})
+		if bootstrapKey != nil {
+			return meta.Put([]byte("bootstrap-user"), bootstrapKey)
+		}
+		return nil
+	})
 }
 
 // CreateUserDBRaw builds a UserDatabase from injected DB handles (for tests).
@@ -219,6 +258,44 @@ func (b *UserDatabase) userRecordExists() (exists bool, err error) {
 		return nil
 	})
 	return
+}
+
+// SetBootstrapUser records the first account created by the empty-db bootstrap.
+// This lets the UI distinguish the bootstrap admin from later admin-created users.
+func (b *UserDatabase) SetBootstrapUser(userID string) error {
+	return b.userDb.Update(func(tx ITx) error {
+		buk := tx.Bucket([]byte(DB_META))
+		if buk == nil {
+			return ErrCardDBNotExists
+		}
+		return buk.Put([]byte("bootstrap-user"), []byte(userID))
+	})
+}
+
+// IsBootstrapUser reports whether userID is the empty-db bootstrap account.
+// For deployments created before this metadata existed, it falls back to the
+// heuristic that the bootstrap account was seeded with userID == username,
+// whereas admin-created accounts use UUIDs.
+func (b *UserDatabase) IsBootstrapUser(userID string) bool {
+	var bootstrapID string
+	_ = b.userDb.View(func(tx ITx) error {
+		buk := tx.Bucket([]byte(DB_META))
+		if buk != nil {
+			if v := buk.Get([]byte("bootstrap-user")); v != nil {
+				bootstrapID = string(v)
+			}
+		}
+		return nil
+	})
+	if bootstrapID != "" {
+		return bootstrapID == userID
+	}
+	// Fallback for databases without a bootstrap marker.
+	info, err := b.UserGetByID(userID)
+	if err != nil {
+		return false
+	}
+	return info.ID == info.Username
 }
 
 // ---------------------------------------------------------------------------
@@ -459,6 +536,41 @@ func (b *UserDatabase) UserSetMustChange(userID string, mustChange bool) (err er
 		}
 		return buk.Put([]byte(userID), data)
 	})
+}
+
+// UserCreate creates a new account with the given username/password/role. The
+// new account is flagged MustChange so the user changes the password on first
+// login. Returns the new userID. Duplicate usernames are rejected.
+func (b *UserDatabase) UserCreate(username, pw, role string) (id string, err error) {
+	if username == "" || pw == "" || (role != RoleAdmin && role != RoleOperator) {
+		return "", ErrCardInput
+	}
+	if _, e := b.UserGetByUsername(username); e == nil {
+		return "", ErrCardAdminFail
+	}
+	id, err = UserNewID()
+	if err != nil {
+		return "", err
+	}
+	salt, _ := DbUUID.NewV4()
+	rec := GenUserRec(username, pw, []byte(salt.String()))
+	if err = b.UserAdd(id, username, rec, salt.String(), role); err != nil {
+		return "", err
+	}
+	if err = b.UserSetMustChange(id, true); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// UserAdminResetPW lets an admin set a new password for a user without knowing
+// the old one. The account is flagged MustChange and its sessions are rotated,
+// so the user is forced to re-login and change the password.
+func (b *UserDatabase) UserAdminResetPW(userID, newPW string) (err error) {
+	if err = b.UserChangePW(userID, newPW); err != nil {
+		return err
+	}
+	return b.UserSetMustChange(userID, true)
 }
 
 // UserList returns every account (id, username, role, mustChange) for the
