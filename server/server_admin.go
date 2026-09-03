@@ -126,6 +126,11 @@ func MakeAdminPage(app *iris.Application) {
 	app.Post("/verify/admin/changerole", adminChangeRole).Use(checkAdminVerify)
 	app.Get("/verify/admin/userlist", adminUserList).Use(checkAdminVerify)
 	app.Post("/verify/admin/logout", adminLogout).Use(checkAdminVerify)
+	app.Post("/verify/operator/logout", adminLogout).Use(checkOperatorVerify)
+	// Unified logout: any authenticated user (admin or operator) may log
+	// themselves out. The header's Sign Out always targets this endpoint so
+	// logout works regardless of which page the user is currently on.
+	app.Post("/verify/logout", adminLogout).Use(checkOperatorVerify)
 	app.Post("/verify/admin/login", adminLogin)
 
 	// Operator self-service security page: any authenticated user may change
@@ -133,6 +138,11 @@ func MakeAdminPage(app *iris.Application) {
 	// template, keeping /verify/admin/security strictly admin-only (Stage 4).
 	app.Get("/verify/operator/security", adminSecurity).Use(checkOperatorVerify)
 	app.Post("/verify/operator/changepw", adminChangePW).Use(checkOperatorVerify)
+	// Unified self-service change-password endpoint: any authenticated user
+	// (admin or operator) may change their own password. The security page
+	// always targets this so the operator page doesn't accidentally POST to the
+	// admin-only /verify/admin/changepw (which 404s for operators).
+	app.Post("/verify/changepw", adminChangePW).Use(checkOperatorVerify)
 
 	// Stage 6.5: admin user management (create account + admin reset password).
 	// Admin-only (checkAdminVerify already denies operators with 404).
@@ -140,7 +150,18 @@ func MakeAdminPage(app *iris.Application) {
 	app.Post("/verify/admin/resetpw", adminResetPW).Use(checkAdminVerify)
 
 	r := app.HandleDir("js/admin", dbPath+"/js/admin")
-	r.Use(checkAdminVerify)
+	// Any authenticated user (admin or operator) may load the admin JS. The
+	// privileged operations stay admin-only because the API routes are still
+	// guarded by checkAdminVerify; the JS itself only contains client logic.
+	// Without this, operators 404 on admin-common.js and logout()/change-pw are
+	// undefined on their security page.
+	r.Use(checkOperatorVerify)
+	// Never cache the admin JS so a stale admin-common.js (which still pointed
+	// to the admin-only logout endpoint) can't mask a fix.
+	r.Use(func(ctx iris.Context) {
+		ctx.Header("Cache-Control", "no-store")
+		ctx.Next()
+	})
 }
 
 func MakeIndex() {

@@ -32,8 +32,15 @@ function logout(e) {
     // So we need a 50ms delay to send to logout request
     var timeOutA = setTimeout(function () {
         let i = "/verify";
-        let l = "/verify/admin/logout";
+        // Use the unified logout endpoint so it works for both admin and
+        // operator sessions (the role-specific endpoints are 404'd by the
+        // wrong guard).
+        let l = "/verify/logout";
         $.post(l, function (data, status) {
+            window.location.href = window.location.protocol + "//" + window.location.host + i;
+        }).fail(function () {
+            // Even if the request fails, bounce to the login page so the
+            // (possibly stale) session is visually cleared.
             window.location.href = window.location.protocol + "//" + window.location.host + i;
         });
     }, 50); // 1000 would be a second

@@ -100,3 +100,49 @@ func TestStage65UserManagement(t *testing.T) {
 		"userid": op1.ID, "newpw": "z",
 	}).Expect().Status(iris.StatusNotFound)
 }
+
+// TestOperatorChangeOwnPassword regresses the bug where the security page
+// POSTed the change-password form to /verify/admin/changepw (admin-only), so
+// operators always failed with "Change fail" even when every field was filled.
+// Operators must be able to change their own password via the unified
+// /verify/changepw endpoint.
+func TestOperatorChangeOwnPassword(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	cardMock := mock.NewMockICardDB(ctrl)
+	cardMock.EXPECT().CheckAdminLogin(gomock.Any(), gomock.Any()).Return(false).AnyTimes()
+
+	dir, _ := os.MkdirTemp("", "op-changepw")
+	defer os.RemoveAll(dir)
+	udb, err := card.CreateUserDB(dir)
+	if err != nil {
+		t.Fatalf("CreateUserDB: %v", err)
+	}
+	defer udb.Close()
+	seedUser(t, udb, "op1", "oppass", card.RoleOperator)
+
+	app := iris.New()
+	cardAdmin = card.MakeCardAdmin("test.com", t.TempDir())
+	cardAdmin.AttachUserDB(udb)
+	app.Post("/login", func(ctx iris.Context) {
+		ctx.StatusCode(cardAdmin.AdminIn(ctx, cardMock))
+	})
+	app.Post("/verify/changepw", adminChangePW).Use(checkOperatorVerify)
+
+	op := httptest.New(t, app, httptest.URL("http://test.com"))
+	op.POST("/login").WithForm(iris.Map{"inid": "op1", "inpw": "oppass"}).
+		Expect().Status(card.SessionPassed)
+
+	// Operator changes own password via the unified endpoint.
+	op.POST("/verify/changepw").WithForm(iris.Map{
+		"orgpw": "oppass", "changepw": "newpass1", "changepw2": "newpass1",
+	}).Expect().JSON().Object().Value("msg").Equal("OK")
+
+	// New password verifies; the old one does not.
+	if !udb.UserVerify("op1", "newpass1") {
+		t.Fatalf("op1 should verify with the new password")
+	}
+	if udb.UserVerify("op1", "oppass") {
+		t.Fatalf("op1 old password should NOT verify after change")
+	}
+}

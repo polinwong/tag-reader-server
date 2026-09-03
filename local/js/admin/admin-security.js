@@ -82,16 +82,24 @@ function onChangeClicked(e) {
 
   let alert = $("#alertPlace");
   alert.empty();
-  if (
-    data.orgpw.length == 0 ||
-    data.changepw.length == 0 ||
-    data.changepw2.length == 0
-  ) {
-    alert.append(getAlert(false, "Change fail: Info not done"));
+  // Check each required field individually so the user knows which one is
+  // missing instead of a generic "Info not done".
+  if (data.orgpw.length == 0) {
+    alert.append(getAlert(false, "Change fail: Current password is required"));
+    return;
+  }
+  if (data.changepw.length == 0) {
+    alert.append(getAlert(false, "Change fail: New password is required"));
+    return;
+  }
+  if (data.changepw2.length == 0) {
+    alert.append(getAlert(false, "Change fail: Please repeat the new password"));
     return;
   }
 
-  $.post("/verify/admin/changepw", data)
+  // Use the unified change-password endpoint so it works for both admin and
+  // operator sessions (the admin-only endpoint 404s for operators).
+  $.post("/verify/changepw", data)
     .done(ret => {
       if (ret.msg == "OK") {
         alert.append(getAlert(true, "change done. Please log in again."));
@@ -101,7 +109,8 @@ function onChangeClicked(e) {
       }
     })
     .catch(res => {
-      alert.append(getAlert(false, "Change fail: " + (res.responseJSON && res.responseJSON.info)));
+      const info = (res.responseJSON && res.responseJSON.info) ? res.responseJSON.info : ("status " + res.status);
+      alert.append(getAlert(false, "Change fail: " + info));
     });
 }
 

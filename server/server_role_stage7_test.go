@@ -129,3 +129,47 @@ func admin2History(t *testing.T, app *iris.Application) int {
 	obj := admin.GET("/verify/api/loginrec").Expect().JSON().Object()
 	return int(obj.Value("data").Array().Length().Raw())
 }
+
+// TestOperatorLoadsAdminJSAndLogout regresses the bug where the js/admin dir
+// was guarded by checkAdminVerify, so operators 404'd on admin-common.js and
+// logout()/change-pw were undefined on their security page (Sign Out did
+// nothing). It also verifies the unified /verify/logout works for operators.
+func TestOperatorLoadsAdminJSAndLogout(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	cardMock := mock.NewMockICardDB(ctrl)
+	cardMock.EXPECT().CheckAdminLogin(gomock.Any(), gomock.Any()).Return(false).AnyTimes()
+
+	dir, _ := os.MkdirTemp("", "op-js")
+	defer os.RemoveAll(dir)
+	udb, err := card.CreateUserDB(dir)
+	if err != nil {
+		t.Fatalf("CreateUserDB: %v", err)
+	}
+	defer udb.Close()
+	seedUser(t, udb, "op1", "oppass", card.RoleOperator)
+
+	app := iris.New()
+	cardAdmin = card.MakeCardAdmin("test.com", t.TempDir())
+	cardAdmin.AttachUserDB(udb)
+	app.Post("/login", func(ctx iris.Context) {
+		ctx.StatusCode(cardAdmin.AdminIn(ctx, cardMock))
+	})
+	// Mirror server_admin.go: js/admin is guarded by checkOperatorVerify and the
+	// unified logout by the same.
+	app.Get("/js/admin/admin-common.js", func(ctx iris.Context) {
+		ctx.WriteString("// js")
+	}).Use(checkOperatorVerify)
+	app.Post("/verify/logout", adminLogout).Use(checkOperatorVerify)
+
+	op := httptest.New(t, app, httptest.URL("http://test.com"))
+	op.POST("/login").WithForm(iris.Map{"inid": "op1", "inpw": "oppass"}).
+		Expect().Status(card.SessionPassed)
+
+	// The operator must be able to load the admin JS (was 404 before the fix).
+	op.GET("/js/admin/admin-common.js").Expect().Status(iris.StatusOK)
+
+	// The unified logout works for operators and clears the session.
+	op.POST("/verify/logout").Expect()
+	op.GET("/js/admin/admin-common.js").Expect().Status(iris.StatusNotFound)
+}

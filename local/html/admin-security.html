@@ -20,25 +20,25 @@ Creater: Kevin Mak, October 2021
   <p>Changing password for: <strong>{{ .username }}</strong></p>
   <form id="changeForm" autocomplete="off">
     <div class="form-group">
-      <label for="orgpw">Current password</label>
+      <label for="orgpw">Current password <span class="text-danger">*</span></label>
       <div class="input-group">
-        <input type="password" class="form-control" name="inorgpw" id="orgpw" autocomplete="off" placeholder="">
+        <input type="password" class="form-control" name="inorgpw" id="orgpw" autocomplete="off" placeholder="" required>
         <div class="input-group-append">
           <button type="button" class="btn btn-outline-secondary pw-toggle" data-target="orgpw">Show</button>
         </div>
       </div>
     </div>
     <div class="form-group">
-      <label for="changepw">New password</label>
+      <label for="changepw">New password <span class="text-danger">*</span></label>
       <div class="input-group">
-        <input type="password" class="form-control" name="inpw" id="changepw" autocomplete="new-password" placeholder="">
+        <input type="password" class="form-control" name="inpw" id="changepw" autocomplete="new-password" placeholder="" required>
         <div class="input-group-append">
           <button type="button" class="btn btn-outline-secondary pw-toggle" data-target="changepw">Show</button>
         </div>
       </div>
     </div>
     <div class="form-group">
-      <label for="changepw2">Repeat new password</label>
+      <label for="changepw2">Repeat new password <span class="text-danger">*</span></label>
       <div class="input-group">
         <input type="password" class="form-control" name="inpw2" id="changepw2" autocomplete="new-password" placeholder="">
         <div class="input-group-append">
