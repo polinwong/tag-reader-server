@@ -68,6 +68,7 @@ func MakeCardPage(app *iris.Application) {
 
 	// Admin view
 	app.Get("/verify/admin", verifyAdmin).Use(checkAdminVerify)
+	app.Get("/verify/admin/loginlog", adminLoginLog).Use(checkAdminVerify)
 	app.Get("/verify/api/loginrec", getLoginRecord).Use(checkAdminVerify)
 	app.Delete("/verify/api/logindel/{id}", removeLoginRecord).Use(checkAdminVerify)
 
@@ -154,6 +155,22 @@ func verifyApiLogin(ctx iris.Context) {
 	}
 }
 
+// adminLoginLog renders the admin "Login log" page, which lists every
+// successful login (GUI and API) since the server was first set up. The data
+// itself is fetched client-side from /verify/api/loginrec (the same endpoint
+// the legacy admin API-record view uses). This page is admin-only.
+func adminLoginLog(ctx iris.Context) {
+	ctx.ViewLayout("page-layout.html")
+	ctx.ViewData("title", "Login log - "+baseTitle)
+	ctx.ViewData("navActiveL3", " active")
+	// Expose the current user's role so the template can show admin-only nav
+	// items (the Login log tab itself is admin-only).
+	if info, ok := cardAdmin.CurrentUserInfo(ctx); ok {
+		ctx.ViewData("role", info.Role)
+	}
+	ctx.View("admin-loginlog.html")
+}
+
 func getLoginRecord(ctx iris.Context) {
 	if cardAdmin != nil && cardAdmin.HasUserDB() {
 		// Stage 7: the complete, append-only login history lives in the user
@@ -211,6 +228,10 @@ func verifyAdmin(ctx iris.Context) {
 <script src="/js/admin/card-verify.js?v=%s"></script>`, jsVersion))
 	ctx.ViewData("message", "")
 	ctx.ViewData("navActiveL1", " active")
+	// Expose role so admin-only nav items render consistently.
+	if info, ok := cardAdmin.CurrentUserInfo(ctx); ok {
+		ctx.ViewData("role", info.Role)
+	}
 	ctx.View("card-verify.html")
 }
 

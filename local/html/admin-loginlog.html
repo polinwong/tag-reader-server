@@ -1,0 +1,26 @@
+<!--
+3D Artefact Exhibition server
+File: admin-loginlog.html, Admin login history page
+(c)Marvel Digital Ltd. 2021
+-->
+{{ render "admin-header.html" }}
+<script src="/js/admin/admin-loginlog.js"></script>
+
+<div class="container-sm pt-3">
+  <h1>Login log</h1>
+  <p class="text-muted">All successful logins (GUI and API) since the server was first set up. This history is append-only and cannot be deleted.</p>
+  <table class="table table-striped">
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Username</th>
+        <th>Role</th>
+        <th>Login ID</th>
+      </tr>
+    </thead>
+    <tbody id="loginlogPlace"></tbody>
+  </table>
+  <div id="loginlogEmpty" class="text-muted d-none">No login records yet.</div>
+</div>
+
+<div id="alertPlace"></div>

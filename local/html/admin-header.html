@@ -21,8 +21,11 @@ Creater: Kevin Mak, March 2021
     </button>
     <div class="collapse navbar-collapse" id="navbarNav">
         <div class="navbar-nav">
+            {{ if eq .role "admin" }}
             <a id="navL1" href="/verify/admin"  class="nav-link{{ .navActiveL1 }}">Index</a>
             <a id="navL2" href="/verify/admin/security"  class="nav-link{{ .navActiveL2 }}">Security</a>
+            <a id="navL3" href="/verify/admin/loginlog"  class="nav-link{{ .navActiveL3 }}">Login log</a>
+            {{ end }}
             <a id="navL9" href="#" class="nav-link" onclick="logout(this);">Sign Out</a>
         </div>
     </div>
