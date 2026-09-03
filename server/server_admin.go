@@ -123,6 +123,8 @@ func MakeAdminPage(app *iris.Application) {
 	app.Get("/verify", LoginPage)
 	app.Get("/verify/admin/security", adminSecurity).Use(checkAdminVerify)
 	app.Post("/verify/admin/changepw", adminChangePW).Use(checkAdminVerify)
+	app.Post("/verify/admin/changerole", adminChangeRole).Use(checkAdminVerify)
+	app.Get("/verify/admin/userlist", adminUserList).Use(checkAdminVerify)
 	app.Post("/verify/admin/logout", adminLogout).Use(checkAdminVerify)
 	app.Post("/verify/admin/login", adminLogin)
 
@@ -159,15 +161,30 @@ func checkAdminVerify(ctx iris.Context) {
 		}
 		return
 	}
-	if ret := cardAdmin.AdminCheck(ctx); ret != card.SessionPassed {
+	// GUI cookie path. Resolve the session once (CurrentUserFull opens the iris
+	// session a single time, also covering AdminCheck's validity check).
+	sess, info, ok := cardAdmin.CurrentUserFull(ctx)
+	if !ok {
 		ctx.NotFound()
 		return
 	}
 	// Stage 4: GUI admin pages are admin-only. Operators (who may only use the
 	// /verify/api/... data endpoints) are denied access to the admin GUI.
-	if role, ok := cardAdmin.UserRoleInCtx(ctx); !ok || role != card.RoleAdmin {
+	if sess.Role != card.RoleAdmin {
 		ctx.NotFound()
 		return
+	}
+	// Stage 6: forced password change. A bootstrap/first admin that has not yet
+	// changed the password is bounced to the security page (except the security
+	// page itself, the change-password endpoint, logout, and static assets).
+	if info.MustChange {
+		p := ctx.RequestPath(true)
+		if p != "/verify/admin/security" && p != "/verify/admin/changepw" &&
+			p != "/verify/admin/logout" && !strings.HasPrefix(p, "/js/admin") {
+			ctx.StatusCode(iris.StatusFound)
+			ctx.Header("Location", "/verify/admin/security")
+			return
+		}
 	}
 	ctx.Next()
 }
@@ -205,7 +222,35 @@ func adminLogin(ctx iris.Context) {
 func adminSecurity(ctx iris.Context) {
 	ctx.ViewLayout("page-layout.html")
 	ctx.ViewData("navActiveL2", " active")
+	// Stage 6: expose the current user's role so the template can show the
+	// role-management section to admins only.
+	if info, ok := cardAdmin.CurrentUserInfo(ctx); ok {
+		ctx.ViewData("role", info.Role)
+		ctx.ViewData("mustChange", info.MustChange)
+	}
 	ctx.View("admin-security.html")
+}
+
+// adminUserList returns all accounts (id, username, role) for the admin
+// role-management UI. Admin-only.
+func adminUserList(ctx iris.Context) {
+	if role, ok := cardAdmin.UserRoleInCtx(ctx); !ok || role != card.RoleAdmin {
+		ctx.StatusCode(iris.StatusForbidden)
+		ctx.JSON(iris.Map{"msg": "FAIL", "info": "Admin privileges required"})
+		return
+	}
+	if cardAdmin == nil || !cardAdmin.HasUserDB() {
+		ctx.StatusCode(iris.StatusInternalServerError)
+		ctx.JSON(iris.Map{"msg": "FAIL", "info": "user store unavailable"})
+		return
+	}
+	list, err := cardAdmin.UserDB().UserList()
+	if err != nil {
+		ctx.StatusCode(iris.StatusInternalServerError)
+		ctx.JSON(iris.Map{"msg": "FAIL", "info": err.Error()})
+		return
+	}
+	ctx.JSON(iris.Map{"msg": "OK", "users": list})
 }
 
 func adminChangePW(ctx iris.Context) {
@@ -225,6 +270,20 @@ func adminChangePW(ctx iris.Context) {
 		return
 	}
 
+	// Stage 5: prefer the multi-user store. The old password (orgpw) must match
+	// the current account; on success sessions are rotated and the user is
+	// logged out.
+	if cardAdmin != nil && cardAdmin.HasUserDB() {
+		if err := cardAdmin.ChangeOwnPassword(ctx, orgpw, pw); err == nil {
+			// Session rotated: log the user out so they re-authenticate.
+			cardAdmin.AdminOut(ctx)
+			ctx.JSON(iris.Map{"msg": "OK", "info": "Password changed. Please log in again."})
+		} else {
+			ctx.JSON(iris.Map{"msg": "FAIL", "info": "Change password failed: " + err.Error()})
+		}
+		return
+	}
+
 	if err := cardDB.ChangeAdminPW(id, pw, orgid, orgpw); err == nil {
 		ctx.JSON(iris.Map{"msg": "OK"})
 	} else {
@@ -235,4 +294,29 @@ func adminChangePW(ctx iris.Context) {
 func adminLogout(ctx iris.Context) {
 	cardAdmin.AdminOut(ctx)
 	ctx.Redirect("/verify/")
+}
+
+// adminChangeRole changes the role of a target user. It is admin-only (enforced
+// here and by checkAdminVerify for the GUI). The underlying store enforces the
+// >=1 admin guard, so the last admin cannot be demoted. On success the target's
+// sessions are rotated (forced re-login).
+func adminChangeRole(ctx iris.Context) {
+	// Admin-only: operators must not reach this even via the API path.
+	if role, ok := cardAdmin.UserRoleInCtx(ctx); !ok || role != card.RoleAdmin {
+		ctx.StatusCode(iris.StatusForbidden)
+		ctx.JSON(iris.Map{"msg": "FAIL", "info": "Admin privileges required"})
+		return
+	}
+	targetID := ctx.PostValue("userid")
+	newRole := ctx.PostValue("role")
+	if targetID == "" || (newRole != card.RoleAdmin && newRole != card.RoleOperator) {
+		ctx.StatusCode(iris.StatusBadRequest)
+		ctx.JSON(iris.Map{"msg": "FAIL", "info": "Bad request"})
+		return
+	}
+	if err := cardAdmin.ChangeUserRole(targetID, newRole); err == nil {
+		ctx.JSON(iris.Map{"msg": "OK", "info": "Role updated. User must log in again."})
+	} else {
+		ctx.JSON(iris.Map{"msg": "FAIL", "info": "Change role failed: " + err.Error()})
+	}
 }

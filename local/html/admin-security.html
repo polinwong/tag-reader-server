@@ -1,6 +1,6 @@
 <!--
 3D Artefact Exhibition server
-File: admin-secuiry.html, Admin secuiry page
+File: admin-security.html, Admin security page
 Creater: Kevin Mak, October 2021
 (c)Marvel Digital Ltd. 2021
 -->
@@ -9,6 +9,14 @@ Creater: Kevin Mak, October 2021
 
 <div class="container-sm pt-3">
   <h1>Security page</h1>
+
+  {{ if .mustChange }}
+  <div class="alert alert-warning" role="alert">
+    You are using the default bootstrap credentials. Please change your password
+    before continuing.
+  </div>
+  {{ end }}
+
   <h4 class="pt-3">Change password</h4>
   <form>
     <div class="form-group">
@@ -19,7 +27,12 @@ Creater: Kevin Mak, October 2021
     </div>
     <div class="form-group">
       <label for="orgpw">Original password</label>
-      <input type="password" class="form-control" name="inorgpw" id="orgpw" placeholder="">
+      <div class="input-group">
+        <input type="password" class="form-control" name="inorgpw" id="orgpw" placeholder="">
+        <div class="input-group-append">
+          <button type="button" class="btn btn-outline-secondary pw-toggle" data-target="orgpw">Show</button>
+        </div>
+      </div>
     </div>
     <div class="form-group">
       <label for="loginid">New user</label>
@@ -29,14 +42,46 @@ Creater: Kevin Mak, October 2021
     </div>
     <div class="form-group">
       <label for="changepw">New password</label>
-      <input type="password" class="form-control" name="inpw" id="changepw" placeholder="">
+      <div class="input-group">
+        <input type="password" class="form-control" name="inpw" id="changepw" placeholder="">
+        <div class="input-group-append">
+          <button type="button" class="btn btn-outline-secondary pw-toggle" data-target="changepw">Show</button>
+        </div>
+      </div>
     </div>
     <div class="form-group">
       <label for="changepw2">Repeat new password</label>
-      <input type="password" class="form-control" name="inpw2" id="changepw2" placeholder="">
+      <div class="input-group">
+        <input type="password" class="form-control" name="inpw2" id="changepw2" placeholder="">
+        <div class="input-group-append">
+          <button type="button" class="btn btn-outline-secondary pw-toggle" data-target="changepw2">Show</button>
+        </div>
+      </div>
     </div>
     <button id="changebtn" type="submit" class="btn btn-primary">Change</button>
   </form>
+
+  {{ if eq .role "admin" }}
+  <h4 class="pt-5">User role management</h4>
+  <p class="text-muted">Select a user and assign their role. At least one admin must always remain.</p>
+  <form id="roleForm">
+    <div class="form-group">
+      <label for="userSelect">User</label>
+      <select class="form-control" id="userSelect"></select>
+    </div>
+    <div class="form-group">
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="radio" name="roleRadios" id="roleAdmin" value="admin">
+        <label class="form-check-label" for="roleAdmin">Admin</label>
+      </div>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="radio" name="roleRadios" id="roleOperator" value="operator">
+        <label class="form-check-label" for="roleOperator">Operator</label>
+      </div>
+    </div>
+    <button id="rolebtn" type="submit" class="btn btn-primary">Update role</button>
+  </form>
+  {{ end }}
 </div>
 
 <div id="alertPlace"></div>

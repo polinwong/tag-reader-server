@@ -259,13 +259,35 @@ bootstrap `admin/123456` path.
 - Existing Stage 1/2/3 tests (`TestUserDBStage1`, `TestStage3AdminLogin`) still
   PASS (no regression).
 
-### Stage 5 — Password & role change + admin-count guard + rotation
+### Stage 5 — Password & role change + admin-count guard + rotation — DONE
 **Goal:** users change own pw; admin changes roles; rotation on change.
-- `UserChangePW` (recompute `rec`/`salt`); `UserChangeRole` (admin-only, with
-  `CountAdmins` guard).
-- On pw/role change: delete old `sessions[token]`, issue new token.
-- **Test:** operator changes own pw → old token expires; admin demotes self/
-  other → advanced access lost immediately; cannot remove last admin.
+- `card/card_user.go`:
+  - `UserGetByID`, `verifyUserPW` helpers.
+  - `UserChangePW(userID, newPW)`: resets salt, recomputes `rec`, then
+    `SessionDeleteForUser` (rotation).
+  - `UserChangeRole(targetUserID, newRole)`: enforces `CountAdmins() > 1` guard
+    when demoting an admin (returns `ErrCardAdminFail`); then writes role and
+    rotates the target's sessions.
+  - `SessionDeleteForUser(userID)`: removes all active sessions of a user.
+- `card/card_admin.go`:
+  - `CurrentUser(ctx)` (resolves UserSession from X-token or GUI session).
+  - `ChangeOwnPassword(ctx, oldPW, newPW)`: verifies old pw then `UserChangePW`.
+  - `ChangeUserRole(targetUserID, newRole)` wraps `UserChangeRole`.
+  - `HasUserDB()`, `UserRoleInCtx()` helpers.
+- `server/server_admin.go`:
+  - `adminChangePW` now uses the multi-user store (`cardAdmin.ChangeOwnPassword`)
+    when attached; on success rotates the session and logs the user out (legacy
+    `cardDB.ChangeAdminPW` fallback kept when no userDB).
+  - New `adminChangeRole` handler (admin-only via `UserRoleInCtx` + `checkAdminVerify`)
+    + route `POST /verify/admin/changerole`.
+- **Tests:**
+  - `card/card_user_stage5_test.go` (`TestStage5StoreMutations`): password change
+    recomputes rec/salt and invalidates old session; role promotion/demotion works;
+    last-admin demotion rejected. PASS.
+  - `server/server_role_stage5_test.go` (`TestStage5PasswordAndRole`): wrong old
+    password rejected; password change rotates GUI session (404 after); role
+    promotion rotates old session; last-admin guard enforced via HTTP. PASS.
+  - Stage 1/2/3/4 tests still PASS (no regression).
 
 ### Stage 6 — Admin security page UI (role selector + show/hide toggle)
 **Goal:** usable management UI.

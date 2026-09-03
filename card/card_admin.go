@@ -185,6 +185,9 @@ func (a *CardAdmin) adminLoginCore(id, pw string, db ICardDB) (token string, sta
 				salt, _ := DbUUID.NewV4()
 				rec := genPWHashWithSalt(id, pw, []byte(salt.String()))
 				if aerr := a.userDB.UserAdd(id, id, rec, salt.String(), RoleAdmin); aerr == nil {
+					// Force the bootstrap admin to change the password before
+					// using the system (Stage 6).
+					a.userDB.UserSetMustChange(id, true)
 					t, te := a.userDB.UserLoginNew(id, id, RoleAdmin)
 					if te == nil {
 						a.lastToken = t
@@ -224,6 +227,16 @@ func (a *CardAdmin) LastLoginToken() string {
 	return a.lastToken
 }
 
+// HasUserDB reports whether the multi-user store is attached (Stage 4+).
+func (a *CardAdmin) HasUserDB() bool {
+	return a.userDB != nil
+}
+
+// UserDB returns the attached multi-user store, or nil when not attached.
+func (a *CardAdmin) UserDB() *UserDatabase {
+	return a.userDB
+}
+
 // UserRoleInCtx resolves the role of the account behind the current GUI
 // session (cookie). It returns the role and true when a valid session token is
 // present; otherwise ("", false). Used by the server's role-based authorization
@@ -249,6 +262,99 @@ func (a *CardAdmin) UserRoleOfToken(token string) (role string, ok bool) {
 		return "", false
 	}
 	return s.Role, true
+}
+
+// CurrentUser resolves the authenticated account from the request, looking at
+// the API X-token header first then the GUI session cookie. It returns the
+// UserSession and true when authenticated, otherwise (UserSession{}, false).
+func (a *CardAdmin) CurrentUser(ctx iris.Context) (UserSession, bool) {
+	if token := ctx.GetHeader("X-token"); token != "" {
+		return a.ResolveSession(token)
+	}
+	// GUI session: recover the full UserSession from the session token.
+	token := a.openSession(ctx).GetString("token")
+	if token == "" {
+		return UserSession{}, false
+	}
+	return a.ResolveSession(token)
+}
+
+// CurrentUserInfo resolves the full account record of the authenticated user
+// (including the MustChange flag). It returns (UserInfo{}, false) when not
+// authenticated or no user store is attached.
+func (a *CardAdmin) CurrentUserInfo(ctx iris.Context) (UserInfo, bool) {
+	cur, ok := a.CurrentUser(ctx)
+	if !ok {
+		return UserInfo{}, false
+	}
+	if a.userDB == nil {
+		return UserInfo{}, false
+	}
+	info, err := a.userDB.UserGetByID(cur.UserID)
+	if err != nil {
+		return UserInfo{}, false
+	}
+	return info, true
+}
+
+// CurrentUserFull resolves both the session and the full account record of the
+// authenticated user in a single session lookup. It is used by checkAdminVerify
+// to avoid opening the iris session twice within one request (which panics).
+func (a *CardAdmin) CurrentUserFull(ctx iris.Context) (UserSession, UserInfo, bool) {
+	if a.userDB == nil {
+		return UserSession{}, UserInfo{}, false
+	}
+	// Single session open: read the session token from the cookie.
+	var token string
+	if t := ctx.GetHeader("X-token"); t != "" {
+		token = t
+	} else {
+		token = a.openSession(ctx).GetString("token")
+	}
+	if token == "" {
+		return UserSession{}, UserInfo{}, false
+	}
+	sess, ok := a.ResolveSession(token)
+	if !ok {
+		return UserSession{}, UserInfo{}, false
+	}
+	info, err := a.userDB.UserGetByID(sess.UserID)
+	if err != nil {
+		return UserSession{}, UserInfo{}, false
+	}
+	return sess, info, true
+}
+
+// ChangeOwnPassword verifies the supplied old password for the currently
+// authenticated account and sets a new password. On success the account's
+// sessions are rotated (old tokens invalidated). It returns an error when the
+// account is not authenticated or the old password does not match.
+func (a *CardAdmin) ChangeOwnPassword(ctx iris.Context, oldPW, newPW string) error {
+	if a.userDB == nil {
+		return ErrCardDBNotExists
+	}
+	cur, ok := a.CurrentUser(ctx)
+	if !ok {
+		return ErrCardInput
+	}
+	info, err := a.userDB.UserGetByID(cur.UserID)
+	if err != nil {
+		return err
+	}
+	if !a.userDB.verifyUserPW(info, oldPW) {
+		return ErrCardAdminFail
+	}
+	return a.userDB.UserChangePW(cur.UserID, newPW)
+}
+
+// ChangeUserRole changes the role of a target account. Admin-only enforcement is
+// the caller's responsibility; the underlying store enforces the >=1 admin
+// guard. On success the target's sessions are rotated.
+func (a *CardAdmin) ChangeUserRole(targetUserID, newRole string) error {
+	if a.userDB == nil {
+		return ErrCardDBNotExists
+	}
+	return a.userDB.UserChangeRole(targetUserID, newRole)
 }
 
 // UserSessionTimeout mirrors the legacy CheckLoginSession API for AppSess.

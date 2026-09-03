@@ -47,11 +47,12 @@ const (
 
 // UserInfo is the database record entry for an account.
 type UserInfo struct {
-	ID       string `json:"id"`
-	Username string `json:"username"`
-	Rec      string `json:"rec"`
-	Salt     string `json:"salt"`
-	Role     string `json:"role"`
+	ID         string `json:"id"`
+	Username   string `json:"username"`
+	Rec        string `json:"rec"`
+	Salt       string `json:"salt"`
+	Role       string `json:"role"`
+	MustChange bool   `json:"mustChange"`
 }
 
 // UserDatabase manages the multi-user account store.
@@ -379,4 +380,174 @@ func (b *UserDatabase) UserCheckLoginSession(token string) (curTimeout int64, er
 		return 0, ErrCardDBRead
 	}
 	return s.LoginTime, nil
+}
+
+// ---------------------------------------------------------------------------
+// Account mutation (Stage 5): password change, role change, session rotation
+// ---------------------------------------------------------------------------
+
+// UserGetByID returns the account record for a userID. ErrCardDBRead when not
+// found.
+func (b *UserDatabase) UserGetByID(userID string) (info UserInfo, err error) {
+	err = b.userDb.View(func(tx ITx) error {
+		buk := tx.Bucket([]byte(DB_USER))
+		if buk == nil {
+			return ErrCardDBNotExists
+		}
+		v := buk.Get([]byte(userID))
+		if v == nil {
+			return ErrCardDBRead
+		}
+		return json.Unmarshal(v, &info)
+	})
+	return
+}
+
+// verifyUserPW reports whether pw matches the account's stored rec/salt.
+func (b *UserDatabase) verifyUserPW(info UserInfo, pw string) bool {
+	return genPWHashWithSalt(info.Username, pw, []byte(info.Salt)) == info.Rec
+}
+
+// UserChangePW resets the account's salt and recomputes rec for the new
+// password. After a successful password change, all active sessions of the
+// account are deleted (session rotation / forced re-login) for security.
+func (b *UserDatabase) UserChangePW(userID, newPW string) (err error) {
+	if newPW == "" {
+		return ErrCardInput
+	}
+	info, err := b.UserGetByID(userID)
+	if err != nil {
+		return err
+	}
+	salt, _ := DbUUID.NewV4()
+	rec := genPWHashWithSalt(info.Username, newPW, []byte(salt.String()))
+	if err := b.userDb.Update(func(tx ITx) error {
+		buk := tx.Bucket([]byte(DB_USER))
+		if buk == nil {
+			return ErrCardDBNotExists
+		}
+		info.Rec = rec
+		info.Salt = salt.String()
+		info.MustChange = false // a successful change clears the forced flag
+		data, e := json.Marshal(info)
+		if e != nil {
+			return e
+		}
+		return buk.Put([]byte(userID), data)
+	}); err != nil {
+		return err
+	}
+	// Session rotation: old tokens are no longer valid after the password change.
+	return b.SessionDeleteForUser(userID)
+}
+
+// UserSetMustChange sets/clears the forced-password-change flag for an account.
+func (b *UserDatabase) UserSetMustChange(userID string, mustChange bool) (err error) {
+	info, err := b.UserGetByID(userID)
+	if err != nil {
+		return err
+	}
+	return b.userDb.Update(func(tx ITx) error {
+		buk := tx.Bucket([]byte(DB_USER))
+		if buk == nil {
+			return ErrCardDBNotExists
+		}
+		info.MustChange = mustChange
+		data, e := json.Marshal(info)
+		if e != nil {
+			return e
+		}
+		return buk.Put([]byte(userID), data)
+	})
+}
+
+// UserList returns every account (id, username, role, mustChange) for the
+// admin role-management UI. Password material is never included.
+func (b *UserDatabase) UserList() (list []UserInfo, err error) {
+	err = b.userDb.View(func(tx ITx) error {
+		buk := tx.Bucket([]byte(DB_USER))
+		if buk == nil {
+			return ErrCardDBNotExists
+		}
+		return buk.ForEach(func(k, v []byte) error {
+			var info UserInfo
+			if e := json.Unmarshal(v, &info); e != nil {
+				return e
+			}
+			list = append(list, info)
+			return nil
+		})
+	})
+	return
+}
+
+// UserChangeRole changes the target account's role. It enforces the guard that
+// the system must keep at least one admin: demoting an admin is rejected when
+// it would leave zero admins. Returns ErrCardAdminFail in that case.
+func (b *UserDatabase) UserChangeRole(targetUserID, newRole string) (err error) {
+	if newRole != RoleAdmin && newRole != RoleOperator {
+		return ErrCardInput
+	}
+	info, err := b.UserGetByID(targetUserID)
+	if err != nil {
+		return err
+	}
+	// Guard: do not remove the last admin.
+	if info.Role == RoleAdmin && newRole != RoleAdmin {
+		if c, e := b.CountAdmins(); e != nil {
+			return e
+		} else if c <= 1 {
+			return ErrCardAdminFail
+		}
+	}
+	if err := b.userDb.Update(func(tx ITx) error {
+		buk := tx.Bucket([]byte(DB_USER))
+		if buk == nil {
+			return ErrCardDBNotExists
+		}
+		info.Role = newRole
+		data, e := json.Marshal(info)
+		if e != nil {
+			return e
+		}
+		return buk.Put([]byte(targetUserID), data)
+	}); err != nil {
+		return err
+	}
+	// Session rotation: existing sessions keep the old role, so invalidate them
+	// to force re-login with the updated role.
+	return b.SessionDeleteForUser(targetUserID)
+}
+
+// SessionDeleteForUser removes every active session belonging to a user (used
+// for rotation after a password or role change).
+func (b *UserDatabase) SessionDeleteForUser(userID string) (err error) {
+	return b.userDb.Update(func(tx ITx) error {
+		buk := tx.Bucket([]byte(DB_USER_SESS))
+		if buk == nil {
+			return ErrCardDBNotExists
+		}
+		// Collect tokens to delete (bucket cannot be mutated during ForEach).
+		var toDelete [][]byte
+		if err := buk.ForEach(func(k, v []byte) error {
+			var s UserSession
+			if err := json.Unmarshal(v, &s); err != nil {
+				return err
+			}
+			if s.UserID == userID {
+				tk := make([]byte, len(k))
+				copy(tk, k)
+				toDelete = append(toDelete, tk)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+		for _, k := range toDelete {
+			if err := buk.Delete(k); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
