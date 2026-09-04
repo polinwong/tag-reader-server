@@ -23,6 +23,13 @@ import (
 	"github.com/aead/cmac"
 )
 
+// statusCtrJumpThreshold is the maximum tolerable gap (in SDMReadCtr reads)
+// between two consecutive server-observed scans before the status is flagged
+// JUMP. The historical value of 2 is too strict for NFC readers that poll the
+// tag several times per presentation; 10 tolerates normal polling while still
+// catching a tag read an unusual number of times (e.g. cloning).
+const statusCtrJumpThreshold = 10
+
 var (
 	ErrVerifySunRead     = errors.New("read uid & ctr error")
 	ErrVerifySunNotMatch = errors.New("verify error, not match")
@@ -330,15 +337,33 @@ func (vc *VerifyCard) VerifyPICCData(piccEncData, sdmmac []byte, db ICardDB, deb
 	}
 
 	if bytes.Equal(ret, sdmmac) {
-		ctrReq, nReq := binary.Uvarint(ctrBuf)
-		ctrSav, nSav := binary.Uvarint(cardCtr)
-		if nReq <= 0 || nSav <= 0 {
+		// The SDMReadCtr inside the (binary/encrypted) PICCData of a SUN is a
+		// 3-byte LITTLE-ENDIAN counter. NXP NTAG 424 DNA Product Data Sheet
+		// §9.3.1: "In cryptographic calculations and represented with binary
+		// encoding on the external interface, the SDMReadCtr is represented LSB
+		// first." (The ASCII/contactless mirror case is MSB first, but the SUN
+		// we verify is the encrypted binary case.) Decode as a fixed-width
+		// unsigned integer padding a trailing zero byte. binary.Uvarint must NOT
+		// be used: it is a base-128 varint and misreads this 24-bit value.
+		if len(ctrBuf) != 3 || len(cardCtr) != 3 {
 			err = ErrVerifySunRead
+			return
+		}
+		ctrReq := binary.LittleEndian.Uint32([]byte{ctrBuf[0], ctrBuf[1], ctrBuf[2], 0})
+		ctrSav := binary.LittleEndian.Uint32([]byte{cardCtr[0], cardCtr[1], cardCtr[2], 0})
+		// The stored counter is initialised to {0,0,0} at registration (and left
+		// untouched by an admin reset). If it is still the placeholder, this is
+		// the first real scan that establishes the baseline: adopt the scanned
+		// counter as the baseline so the scan is NORMAL instead of a spurious
+		// JUMP, since the tag's real counter is already well past 0 after writing.
+		if bytes.Equal(cardCtr, []byte{0, 0, 0}) {
+			db.UpdateCardCTR(uid, ctrBuf, StatusCtrNormal)
+			cardid = uid
 			return
 		}
 		if ctrReq > ctrSav {
 			status := StatusCtrNormal
-			if ctrReq-ctrSav > 2 {
+			if ctrReq-ctrSav > statusCtrJumpThreshold {
 				status = StatusCtrJump
 			}
 			db.UpdateCardCTR(uid, ctrBuf, status)

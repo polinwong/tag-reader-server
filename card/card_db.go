@@ -641,13 +641,22 @@ func (b *CardDatabase) GetCardList(page, pageMax int) (ret []iris.Map, size int)
 				hSign := o.sign
 				link := o.link
 				fkey := o.fkey
-				ctr, _ := binary.Uvarint(o.ctr)
+				// The SDMReadCtr is a 3-byte LITTLE-ENDIAN counter inside the
+				// binary/encrypted PICCData of a SUN (NXP NTAG 424 DNA Product
+				// Data Sheet §9.3.1: "represented LSB first ... with binary
+				// encoding on the external interface"). Pad with a trailing zero.
+				var ctrVal uint32
+				if len(o.ctr) == 3 {
+					ctrVal = binary.LittleEndian.Uint32([]byte{o.ctr[0], o.ctr[1], o.ctr[2], 0})
+				}
+				ctrHex := hex.EncodeToString(o.ctr)
 				status := o.status
 				ret = append(ret, iris.Map{
 					"id":     hId,
 					"sign":   hSign,
 					"link":   link,
-					"ctr":    ctr,
+					"ctr":    ctrVal,
+					"ctrhex": ctrHex,
 					"fkey":   fkey,
 					"status": status,
 				})

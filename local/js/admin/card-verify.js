@@ -409,7 +409,7 @@ function cardRenderList() {
 <th scope="row">` + c + `</th>
 <td>` + e.id + `</td>
 <td>` + e.name + ` <span class="modelLinkObj">` + e.link + `<span>` + `</td>
-<td>` + e.ctr + `</td>
+<td>` + e.ctr + ` <span style="font-size:9px;color:#888">(` + (e.ctrhex || "") + `)</span></td>
 <td>` + status + `</td>
 <td>` + signBtn + `</td>
 </tr>`);
