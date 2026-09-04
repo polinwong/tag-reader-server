@@ -43,11 +43,40 @@ The ECDSA public key hex value (identical in both server and app):
 |----------|------|-------|-----------------|---------|
 | **sdmTestKey** | 16 bytes (all zeros) | Debug only | Hardcoded in `verify_base.go:36-39` | Replaces both SdmMetaKey and cardFileKey when `--debug` CLI flag is set. **Must never be used in production.** |
 
-### 2.4 Admin Authentication Key
+### 2.4 Server Login Keys (Admin and Operator Roles)
 
-| Key Name | Algorithm | Scope | Storage Location | Purpose |
-|----------|-----------|-------|-----------------|---------|
-| **Admin Password Hash** | HMAC-SHA256 | Global | Server: `cardrecord.db` (admin-hash bucket); hardcoded default in `card_admin.go:31-32` | Verifies admin login credentials for write/clear operations |
+> Not a tag/NFC key. This section documents the **server account credentials and session material** that authorise the write (§7), clear (§8) and card/model administration operations described elsewhere in this document.
+
+| Key / Material | Algorithm | Scope | Storage Location | Purpose |
+|----------------|-----------|-------|-----------------|---------|
+| **User Password Hash** (`rec`) | HMAC-SHA256 — key = per-account salt, message = `username ‖ password`, hex-encoded | Per account | `local/userdb.db`, `users` bucket (`UserInfo`: `id`, `username`, `rec`, `salt`, `role`, `mustChange`) | Authoritative credential for **both** admin and operator logins (`UserVerify()`); authorises the GUI pages and the `/verify/api/*` routes |
+| **Account Salt** (`salt`) | Random UUID v4; regenerated on every password change | Per account | Same `users` bucket | HMAC key for `rec`. Password material — **never leaves the server**: `/verify/admin/userlist` returns only the `UserListView` projection (`id`, `username`, `role`, `mustChange`) |
+| **Session Token** | UUID v4, 7-day expiry (`API_SESSION_TIME`) | Per session | `userdb.db` `sessions` bucket; the GUI also stores it in the Iris cookie `VerifyServer` (`adminsession.db`) | Bearer material for both login paths: GUI cookie, and the API `X-token` header issued by `POST /verify/api/login` |
+| **Legacy Admin Hash** (bootstrap / fallback only) | HMAC-SHA256 with the **fixed global** salt `2f6a4c16e84e` over `username ‖ password`; hardcoded fallback constant when no hash is stored | Global (legacy) | `local/admin.db` → `admin-hash` bucket (`rec`, `salt`); constant in `card/card_admin.go:32-33` | Accepted **only** while the `users` bucket is empty, to seed the first account (`role=admin`, tagged bootstrap, flagged `mustChange`). Not part of any tag/verification flow |
+
+**Generation and verification** (`card/card_user.go`, `card/card_admin.go`, `card/card_db.go`):
+
+- `rec = hex(HMAC-SHA256(key = salt, message = username ‖ password))` — a single HMAC pass; no KDF, no salt stretching, no work factor.
+- `UserChangePW()` mints a **new salt**, recomputes `rec`, and deletes every session of that account (rotation → forced re-login).
+- Login order (`adminLoginCore()`): the `users` bucket first; the legacy `CheckAdminLogin()` (`admin.db` hash, or the hardcoded constant) is consulted **only** while no account exists.
+- **Bootstrap account:** created from the legacy credentials on an empty store, tagged in the `meta` bucket as the bootstrap user and flagged `mustChange`, so the default password must be changed once. After seeding, the legacy path is never used again.
+- **Do not change `pwsalt` / `password` (`card/card_admin.go:32-33`).** That constant is the username/password pair used to log in to the server **before** multi-user support and `userdb.db` existed; it is the last-resort way in, so it must be preserved verbatim. It is unrelated to the sample credential used by the unit tests (`sampleuser` / `samplepw`), which is test-only.
+
+**Session lifecycle:** token = UUID v4, valid 7 days (`UserCheckLoginSession`); written to `sessions[token]` **and** appended to the append-only `loginlog` (username, role, time) on every login; logout deletes the token server-side; changing a password or a role rotates (deletes) all of the account's sessions.
+
+#### 2.4.1 Admin Role (`role = "admin"`)
+
+- **GUI:** `/verify` login → `/verify/admin`, the admin security page (password change + account management) and the login log page.
+- **Account management:** `POST /verify/admin/createuser`, `POST /verify/admin/resetpw`, `POST /verify/admin/changerole`, `GET /verify/admin/userlist`. Demotion is refused when it would leave zero admins.
+- **All `/verify/api/*` routes:** card list/search, `cardwrite`, `carddel`, `cardpwupdate`, `cardlinkset`, model list/search/write, login history.
+- **Full tag lifecycle:** write (§7), clear (§8) — both receive `fkey` + `metakey` from `cardWrite`.
+
+#### 2.4.2 Operator Role (`role = "operator"`)
+
+- **GUI:** self-service only — `/verify` login → `/verify/operator/security` (change own password via `POST /verify/changepw`) and logout via `POST /verify/logout`. The admin index, admin security page, account management and login log return **404** (`checkAdminVerify` denies with 404 so route existence is not disclosed).
+- **API (`X-token` header):** only the three-route whitelist in `checkAdminVerify` — `/verify/api/modellist`, `/verify/api/cardwrite`, `/verify/api/cardsearch`. The whitelist validates the token but **not** the role, so an operator **can write and clear tags** with the mobile app through the same `POST /verify/api/login` → token flow, including receiving `fkey` + `metakey` from `cardWrite`.
+- **Cannot:** create or reset accounts, change roles, read or delete login history, edit card records (`cardchecked`, `cardpwupdate`, `carddel`, `cardlinkset`), or manage models.
+- Operators never receive `rec`/`salt`: the account list is served as the `UserListView` projection, and the security page never pre-fills a password.
 
 ### 2.5 NXP TapLinx SDK License Keys
 
@@ -811,6 +840,10 @@ Source: `card/verify_base.go:200-202` and `card/verify_base.go:262-264`
 | First-startup MetaKey bug | Low | On first startup, the MetaKey is written to disk but not loaded into memory. The server must be restarted. Source: `verify_base.go:69-74` |
 | LRP mode not fully tested | Medium | Code comment explicitly states "LRP case, not fully tested" (`verify_base.go:193`) |
 | EncFileData not implemented | Low | SDM MAC only covers PICC data, not file data. The `encFile` parameter in `calculateSdmMac` is unused. |
+| Login hash has no work factor | Medium | `rec` is a single HMAC-SHA256 pass over `username ‖ password` with a per-account random salt — no KDF, no stretching. An offline brute force is cheap if `userdb.db` leaks. |
+| Bootstrap legacy credential | Medium | With an empty `users` bucket the legacy credential — the `admin.db` `admin-hash`, or the hardcoded pre-multi-user constant — is accepted once to seed the first admin (flagged `mustChange`). That constant must not be changed, so it stays valid as the last-resort login; `admin.db` must therefore never be overwritten. |
+| Legacy hash uses a global salt | Low | The pre-user-store `admin.db` credential uses one fixed salt (`pwsalt`) for every credential; the current per-account salt removes this weakness for new accounts. |
+| Exposure of `rec`/`salt` | Low (mitigated) | `UserInfo` carries `rec`/`salt` inside the store, but the only client-facing endpoint serves the `UserListView` projection, so password material never reaches the browser. |
 
 ### 13.2 Tag State After Operations
 
@@ -849,6 +882,14 @@ Source: `card/verify_base.go:200-202` and `card/verify_base.go:262-264`
 | `server/server_card_verify.go:311-338` | `cardWrite()` | Card write endpoint, returns fkey + metakey |
 | `server/server_card_verify.go:428-527` | `verifySUN()` | SUN verify endpoint |
 | `server/server_card_verify.go:543-578` | `verifyUID()` | UID signature verify endpoint |
+| `card/card_db.go:546-552` | `genPWHashWithSalt()` | Password hash: HMAC-SHA256(key=salt, msg=username ‖ password) |
+| `card/card_user.go:218-227` | `UserVerify()` | Account login verification against `rec` |
+| `card/card_user.go:441-471` | `UserLoginNew()` / `UserCheckLoginSession()` | Mint and validate the 7-day session token |
+| `card/card_user.go:499-534` | `UserChangePW()` | New salt + recomputed `rec`, then session rotation |
+| `card/card_user.go:587-612` | `UserList()` | Account list as the `UserListView` projection (no `rec`/`salt`) |
+| `card/card_admin.go:32-44` | `pwsalt` / `password` / `GenPWHash()` | Legacy global salt, fallback hash constant, legacy hash function |
+| `card/card_admin.go:188-233` | `adminLoginCore()` | User-store login; seeds the bootstrap admin when the store is empty |
+| `server/server_admin.go:171-228` | `checkAdminVerify()` / `checkOperatorVerify()` | Admin guard (incl. the 3-route `X-token` whitelist) and self-service guard |
 
 ### App (TypeScript/Java)
 

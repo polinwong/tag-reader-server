@@ -200,9 +200,12 @@ func (a *CardAdmin) adminLoginCore(id, pw string, db ICardDB) (token string, sta
 			return t, SessionPassed
 		}
 
-		// Bootstrap: no accounts yet -> accept legacy admin/123456 (single
-		// bootstrap admin) and seed the first account into the user store.
-		// After seeding, subsequent logins use the new store only.
+		// Bootstrap: no accounts yet -> accept the legacy credential that
+		// predates multi-user support (admin.db admin-hash, or the hardcoded
+		// pwsalt/password fallback below) and seed the first account into the
+		// user store. The hardcoded constant is the server login used before
+		// userdb.db existed; it is the last-resort way in and must NOT be
+		// changed. After seeding, subsequent logins use the new store only.
 		if exists, e := a.userDB.userRecordExists(); e == nil && !exists {
 			if db.CheckAdminLogin(id, pw) {
 				salt, _ := DbUUID.NewV4()
