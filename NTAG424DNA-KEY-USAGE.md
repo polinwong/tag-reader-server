@@ -180,18 +180,21 @@ Source: `server/server_card_verify.go:337`
 
 ### 4.2 cardFileKey (FileKey)
 
-**Generation:** When a new card is registered via `WriteCardData()`, a UUID v4 is generated and its raw bytes (hex-encoded) become the FileKey.
+**Generation:** When a new card is registered via `WriteCardData()`, the FileKey is derived from the tag UID using the NXP AN12196 §4.4 SUN key-derivation KDF (SP 800-108 AES-CMAC), keyed by `AppMasterKey` (the application master key / KMC). Because the key is a deterministic function of the UID it is reproducible at verification time, and it is still persisted in `carddata.db` for backward compatibility with tags written before this scheme.
 
-Source: `card/card_db.go:665-709` — `WriteCardData()`
+Source: `card/verify_base.go` — `GenCardFileKey()`; `card/db_types.go` — `FileKeyGen` / `DbFileKeyGen`; `card/card_db.go` — `WriteCardData()`
 
 ```
 New card:
-  UUID v4 generated via DbUUID.NewV4()
-  fkey = hex.EncodeToString(uuid.Bytes())  // 32 hex chars = 16 bytes
+  fkey = GenCardFileKey(uid)            // NXP §4.4 KDF: AES-CMAC(AppMasterKey, 0x00 0x00 || uid || KeySet || KeyNo)
+  fkey = hex.EncodeToString(fkey)       // 32 hex chars = 16 bytes
+  // KeyNo = 0x01 = AppKey1 = SDM File Read Key (matches writeFileId)
 
 Existing card (re-write):
-  Existing fkey is preserved and returned
+  Existing fkey is preserved and returned (DB stays in sync with the tag)
 ```
+
+**Note:** Rotating `AppMasterKey` (the KMC) re-derives every tag's FileKey, so previously written tags would need to be re-personalized. This matches NXP's KMC-rotation model. The KeySet (`0x00`) and KeyNo (`0x01`) constants are the single place to adjust the NXP derivation convention.
 
 **Distribution:** The FileKey is sent to the mobile app during the card write process, as a hex-encoded string in the JSON response field `"fkey"`.
 
@@ -384,7 +387,7 @@ This describes the complete flow when an admin writes a new tag or re-writes an 
 2. Verify ECDSA signature: `VerifyUIDBase64(sign, id)` using the **ECDSA Public Key**
 3. If signature is invalid: return FAIL
 4. Write card data to database: `WriteCardData(uid, ctr=[0,0,0], signature, link)`
-   - **New card:** Generate UUID v4 → hex-encode as FileKey; store in `carddata.db`
+   - **New card:** Derive FileKey from UID via NXP §4.4 KDF (keyed by `AppMasterKey`) → hex-encode; store in `carddata.db`
    - **Existing card:** Preserve existing FileKey; update link and signature
 5. Return to app:
    ```json
@@ -708,7 +711,7 @@ Server                          App (WriterPage)              Tag (NTAG424DNA)
   │  [ECDSA Public Key]              │                            │
   │                                  │                            │
   │  WriteCardData()                 │                            │
-  │  → Generate UUID v4 as FileKey   │                            │
+  │  → Derive FileKey (NXP §4.4 KDF) │                            │
   │  → Store {uid, fkey, ctr=0,     │                            │
   │     sign, link} in carddata.db   │                            │
   │                                  │                            │
@@ -834,7 +837,7 @@ Source: `card/verify_base.go:200-202` and `card/verify_base.go:262-264`
 | Observation | Severity | Detail |
 |-------------|----------|--------|
 | MetaKey shared across all tags | Medium | A single MetaKey compromise affects all tags. Per-tag MetaKeys would be more secure but are not supported by the current design. |
-| FileKey is UUID v4, not crypto-derived | Low | UUID v4 has 122 bits of randomness, which is sufficient for AES-128, but it's not generated via a KDF. |
+| FileKey derived via NXP §4.4 KDF (UID + AppMasterKey) | Low | Now keyed by `AppMasterKey` via SP 800-108 AES-CMAC; deterministic per UID. Rotating `AppMasterKey` re-derives all FileKeys (must re-personalize tags). |
 | Both keys transmitted to app | Medium | The MetaKey and FileKey leave the server during the write process. Compromise of the app or network could expose these keys. Mitigated by HTTPS. |
 | No key rotation | Medium | There is no mechanism to rotate the MetaKey. If compromised, all tags must be reprogrammed. |
 | First-startup MetaKey bug | Low | On first startup, the MetaKey is written to disk but not loaded into memory. The server must be restarted. Source: `verify_base.go:69-74` |

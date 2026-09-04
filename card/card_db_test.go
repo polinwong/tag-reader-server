@@ -16,9 +16,16 @@ import (
 	"time"
 
 	"github.com/golang/mock/gomock"
-	uuid "github.com/iris-contrib/go.uuid"
 	"go.etcd.io/bbolt"
 )
+
+// fixedFileKeyGen is a deterministic test double for card.FileKeyGen.
+type fixedFileKeyGen struct {
+	val []byte
+	err error
+}
+
+func (m fixedFileKeyGen) Gen(uid []byte) ([]byte, error) { return m.val, m.err }
 
 // func MakeTempPath() string {
 // 	d, err := os.MkdirTemp("", "tag-server")
@@ -915,10 +922,14 @@ func TestCard(t *testing.T) {
 		}
 	})
 
-	// Need mock UUID to give fixed id
-	uuidMock := mock.NewMockUUID(ctrl)
-	tmpluuid := card.DbUUID
-	card.DbUUID = uuidMock
+	// Mock the per-tag file-key generator (NXP AN12196 §4.4 KDF) with a
+	// deterministic value. The fixed bytes below hex-encode to refKey, so the
+	// newly written record in C1 matches tmplJSON exactly as the old UUID mock did.
+	tmplFkey := []byte{0x00, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
+		0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10}
+	origGen := card.DbFileKeyGen
+	card.DbFileKeyGen = fixedFileKeyGen{val: tmplFkey}
+	defer func() { card.DbFileKeyGen = origGen }()
 
 	// Dummy dataset
 	tmplId := []byte{0x00, 0x12, 0x34, 0x89, 0x9a, 0xbc, 0xde}
@@ -930,10 +941,6 @@ func TestCard(t *testing.T) {
 		0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
 	}
 	tmplCtr := make([]byte, 3)
-	uuidMockval := uuid.UUID{
-		0x00, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde,
-		0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10,
-	}
 
 	// For better reading the dummy set, following whill use
 	// `strings.Replace()` and refer to `tmplJSON` to make to
@@ -958,20 +965,21 @@ func TestCard(t *testing.T) {
 
 		// C1. Should success write card data
 		retJson1 := []byte(tmplJSON)
-		uuidMock.EXPECT().NewV4().Return(uuidMockval, nil)
 		bukMock.EXPECT().Get(gomock.Any()).Return(nil)
 		bukMock.EXPECT().Put(tmplId, retJson1).Return(nil)
 		if fkey, err := db.WriteCardData(tmplId, tmplCtr, tmplSign, refLink); err != nil || fkey == "" {
 			t.Errorf(`Should success write card data`)
 		}
 
-		// C2. Should failed when uuid error
-		fakeuuidError := errors.New("fake uuid error")
-		uuidMock.EXPECT().NewV4().Return(uuid.UUID{}, fakeuuidError)
+		// C2. Should failed when file-key generation error
+		fakeuuidError := errors.New("fake filekey error")
+		card.DbFileKeyGen = fixedFileKeyGen{err: fakeuuidError}
 		bukMock.EXPECT().Get(gomock.Any()).Return(nil)
 		if fkey, err := db.WriteCardData(tmplId, tmplCtr, tmplSign, refLink); err != fakeuuidError || fkey != "" {
-			t.Errorf(`Should failed when uuid error`)
+			t.Errorf(`Should failed when filekey generation error`)
 		}
+		// restore working generator for the remaining cases
+		card.DbFileKeyGen = fixedFileKeyGen{val: tmplFkey}
 
 		// C3. Should update the existed record
 		link3 := "https://newlink"
@@ -981,7 +989,7 @@ func TestCard(t *testing.T) {
 		bukMock.EXPECT().Get(gomock.Any()).Return([]byte(rawJson3))
 		bukMock.EXPECT().Put(tmplId, []byte(retJson3)).Return(nil)
 		if fkey, err := db.WriteCardData(tmplId, tmplCtr, tmplSign, link3); err != nil || fkey != pwN {
-			t.Errorf(`Should failed when uuid error`)
+			t.Errorf(`Should failed when filekey generation error`)
 		}
 
 		// C4. Should failed recived invalid JSON
@@ -1009,8 +1017,6 @@ func TestCard(t *testing.T) {
 			t.Errorf(`Should return err when nil bucket returned`)
 		}
 	})
-
-	card.DbUUID = tmpluuid
 
 	t.Run("D.ReadCardData", func(t *testing.T) {
 		cardSet = defaultCardSet()

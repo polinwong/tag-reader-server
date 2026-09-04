@@ -687,11 +687,11 @@ func (b *CardDatabase) WriteCardData(cardId, ctr, cardSign []byte, link string) 
 				return buk.Put(cardId, m)
 			}
 		} else {
-			id, err := DbUUID.NewV4()
+			fk, err := DbFileKeyGen.Gen(cardId)
 			if err != nil {
 				return err
 			}
-			fkey = hex.EncodeToString(id.Bytes())
+			fkey = hex.EncodeToString(fk)
 			if m, err := json.Marshal(iris.Map{
 				jsonSign:   cardSign,
 				jsonCtr:    ctr,

@@ -75,7 +75,7 @@ CREATE TABLE card_record (
     sign     VARCHAR(120) NOT NULL,          -- base64 ECDSA signature (56 bytes)
     ctr      VARCHAR(16)  NOT NULL,          -- base64 3-byte read counter
     link     VARCHAR(64)  NULL,              -- model UUID (FK to model_record)
-    filekey  CHAR(32)     NOT NULL,          -- 16-byte hex (UUID) per-tag key
+    filekey  CHAR(32)     NOT NULL,          -- 16-byte hex, NXP §4.4 KDF-derived per-tag key (UID + AppMasterKey)
     status   ENUM('NORMAL','JUMP','REPEATED') NOT NULL DEFAULT 'NORMAL'
 ) ENGINE=InnoDB;
 

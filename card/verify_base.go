@@ -96,6 +96,46 @@ func loadOrCreateAESKey(keyPath string) []byte {
 	}
 }
 
+// NXP AN12196 §4.4 SUN key derivation (SP 800-108 AES-CMAC KDF).
+//
+// The per-tag SDM File Read Key (AppKey1 / writeFileId=1) is diversified from
+// the application master key (KMC) and the tag UID, so it is deterministic and
+// reproducible at verification time without being stored. The diversification
+// input follows NXP's documented layout:
+//
+//	[0x00, 0x00] || UID(7) || KeySet(1) || KeyNumber(1)
+//
+// KeyNumber is the application key slot the derived key is programmed into
+// (0x01 = AppKey1 = SDM File Read Key), matching writeFileId in the app.
+// These constants are the single place to adjust if a different KMC or
+// NXP key-number convention is required.
+const (
+	sdmFileKeyDeriveSet = 0x00 // KeySet (RFU / tag derivation sub-location)
+	sdmFileKeyDeriveNo  = 0x01 // SDM File Read Key -> AppKey1 (writeFileId=1)
+)
+
+// GenCardFileKey derives the per-tag SDM File Read Key from the tag UID using
+// the NXP AN12196 §4.4 KDF, keyed by AppMasterKey (the application master key,
+// i.e. the SUN key-management key / KMC).
+func GenCardFileKey(uid []byte) ([]byte, error) {
+	if len(uid) != 7 {
+		return nil, errors.New("sdm file key derivation requires a 7-byte UID")
+	}
+	if len(AppMasterKey) != 16 {
+		return nil, errors.New("application master key (KMC) not loaded")
+	}
+	block, err := aes.NewCipher(AppMasterKey)
+	if err != nil {
+		return nil, err
+	}
+	// Diversification input: 0x00 0x00 || UID(7) || KeySet(1) || KeyNumber(1)
+	div := make([]byte, 0, 2+len(uid)+2)
+	div = append(div, 0x00, 0x00)
+	div = append(div, uid...)
+	div = append(div, sdmFileKeyDeriveSet, sdmFileKeyDeriveNo)
+	return cmac.Sum(div, block, 16)
+}
+
 // GenPublicKey make the Public key data for ready to verify signature and card UID
 func (vc *VerifyCard) genPublicKey() {
 	vc.PublicKeyHexRaw = "048A9B380AF2EE1B98DC417FECC263F8449C7625CECE82D9B916C992DA209D68422B81EC20B65A66B5102A61596AF3379200599316A00A1410"

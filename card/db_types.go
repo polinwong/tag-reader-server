@@ -117,3 +117,19 @@ type UUIDImpl struct{}
 func (UUIDImpl) NewV4() (uuid.UUID, error) {
 	return uuid.NewV4()
 }
+
+// FileKeyGen derives the per-tag SDM File Read Key from the tag UID.
+// The default implementation uses the NXP AN12196 §4.4 KDF (see GenCardFileKey).
+// It is abstracted so tests can inject a deterministic generator.
+type FileKeyGen interface {
+	Gen(uid []byte) ([]byte, error)
+}
+
+type fileKeyGenImpl struct{}
+
+func (fileKeyGenImpl) Gen(uid []byte) ([]byte, error) {
+	return GenCardFileKey(uid)
+}
+
+// DbFileKeyGen is the active per-tag file-key generator (swappable in tests).
+var DbFileKeyGen FileKeyGen = fileKeyGenImpl{}
