@@ -38,35 +38,69 @@ the **same HTTP API**.
 ## 2. `tag-reader-server` (Go)
 
 ### 2.1 Startup / entry
-- `main.go` → calls `server.MakeVerifyServer(...)`. Binds Iris on `IP:PORT`
-  (config constants in `server/server_main.go`); supports both `:4430` (new
-  domain `verifynfc.top`) and legacy `:443`/`:8080` (old `coinllectibles.art`).
-- On startup it builds:
+- `main.go` → `server.ServerMain` → `server.newIrisApp()`. Binds Iris on
+  `IP:PORT` (`server/server_main.go`); `:4430` (new `verifynfc.top`) or legacy
+  `:443`/`:8080` (old `coinllectibles.art`).
+- On startup it builds (in this order):
+  - `card.MakeCardAdmin(...)` + `cardAdmin.MakeUserAdmin(dbPath)` — the GUI
+    session store (`adminsession.db`, 7-day cookie) and the **user store**
+    (`userdb.db`, see §2.3).
   - `card.MakeVerifyCard(dbPath)` — generates/loads `AppMasterKey` and
-    `SdmMetaKey` (see §2.4), and hard-codes the NXP ECDSA public key.
-  - `card.MakeCardDatabase(dbPath)` — opens bbolt DBs.
-  - `card.MakeCardAdmin(...)` — session store (boltdb-backed, 7-day cookie).
+    `SdmMetaKey` (see §2.5), and hard-codes the NXP ECDSA public key.
+  - `card.CreateCardDB(dbPath)` — opens `admin.db` (legacy credentials) and
+    `carddata.db`.
 
-### 2.2 Routes (`server/server_main.go`, `server_card_verify.go`)
-Key endpoints (also mirrored in `server/server_admin.go`):
+### 2.2 Routes (client-facing)
+The desktop and Android clients use exactly these endpoints:
 
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
 | POST | `/verify/api` | none | Verify ECDSA signature (`s`=sig b64url, `u`=uid b64url). Returns `msg:"key verify"` + `result`. |
 | POST | `/verify/sun` | none | Verify SDM tap data (`d`=SUN string). Returns `msg:"OK"` + `link`. |
-| GET  | `/verify/api/linkmodel/:id` | none | Return model name/img/desc for a linked artefact. |
-| POST | `/verify/api/login` | none | Admin login (`inid`,`inpw`). Sets session cookie, returns `token`. |
+| GET  | `/verify/api/linkmodel/:id` | none | Model name/img/desc for a linked artefact. |
+| POST | `/verify/api/login` | none | Login (`inid`,`inpw`); returns `token` (also sets the GUI cookie). |
 | GET  | `/verify/api/modellist?page=` | token | Paginated model list. |
 | GET  | `/verify/api/cardsearch?id=` | token | Does this UID already exist? (`msg:"EXISTED"`). |
-| POST | `/verify/api/cardwrite` | token | Register a tag: body `id`,`sign`,`link`. **Returns the three keys** `fkey`, `metakey`, `appmasterkey` (each 32-hex-char = 16-byte AES). |
-| POST | `/verify/api/cardupdate`, `/carddel`, `/model*` etc. | token | Model CRUD, card link/delete/password. |
-| GET  | `/verify/api/dataout`, `/data?...` | varies | Export / dump records as JSON/CSV. |
+| POST | `/verify/api/cardwrite` | token | Register a tag: body `id`,`sign`,`link`. **Returns the three keys** `fkey`, `metakey`, `appmasterkey` (each 32 hex chars = 16-byte AES). |
+| POST | `/verify/api/cardchecked`, `/cardpwupdate`, `/carddel`, `/cardlinkset` | token | Card status reset / file-key update / delete / re-link. |
+| POST/GET | `/verify/api/modelwrite`, `/modelimgclean`, `/modelsearch` | token | Model CRUD and image cleanup. |
 
-`checkHeader()` requires `X-Requested-With: com.mdl.arttagscanner` on most
-state-changing/admin calls (mirrors the Android app package name). The desktop
-client sends the same header.
+The **operator** role is limited to the three token routes `modellist`,
+`cardwrite`, `cardsearch`; every other admin route is admin-only. Account and
+role management, the admin GUI and the login-history view are documented in
+`SERVER_REFERENCE.md` §2.2–2.3.
 
-### 2.3 SDM verification (`card/verify_base.go` — `VerifyPICCData`)
+`checkHeader()` requires `X-Requested-With: com.mdl.arttagscanner` (the Android
+package name) on `/verify/api/login` and on the CORS preflights; the desktop
+client sends the same header. State-changing admin routes authenticate with the
+session cookie or the `X-token` header instead.
+
+### 2.3 Accounts, roles and sessions
+A dedicated bbolt store `userdb.db` holds all accounts; `admin.db` is now only a
+bootstrap/fallback source.
+
+- **Roles** — `admin` (full access) and `operator` (the three token routes plus
+  a self-service password page). The role lives in the session record, so it is
+  enforced entirely server-side: **no client change was required**.
+- **Accounts** — key `userID` (UUID), value `{username, rec, salt, role,
+  mustChange}`; `rec = hex(HMAC-SHA256(salt, username+password))`, recomputed
+  with a fresh salt on every password change. Usernames are immutable.
+- **Sessions** — `sessions[token] = {userID, username, role, loginTime}`; the
+  GUI cookie carries the token, the app sends it as `X-token`. 7-day expiry.
+- **Login history** — `loginlog` is append-only (never deleted) and backs the
+  admin "Login log" page and `/verify/api/loginrec`.
+- **Bootstrap** — with an empty `users` bucket the legacy `admin`/`123456`
+  default (or an existing `admin-hash`) is accepted once; the first account is
+  seeded as `admin`, tagged in `meta` and flagged `mustChange`. Afterwards the
+  legacy path is never consulted.
+- **Guards** — `checkAdminVerify` (admin GUI, or a valid token on the operator
+  whitelist) and `checkOperatorVerify` (any logged-in user). Denials are 404 on
+  the GUI guard (route-existence hiding); in-handler role checks return 403.
+- **Rotation** — a password or role change deletes every session of that
+  account, so a demoted admin loses access immediately. Logout deletes the
+  session server-side. Demoting the last admin is rejected.
+
+### 2.4 SDM verification (`card/verify_base.go` — `VerifyPICCData`)
 This is the cryptographic core for `/verify/sun`:
 1. Decrypt PICC data with `SdmMetaKey` (AES-128-CBC, zero IV). LRP mode
    (24-byte PICC) is partially implemented via `lrp.go` but not fully tested.
@@ -89,7 +123,7 @@ This is the cryptographic core for `/verify/sun`:
 `VerifyPlainSUN` / `VerifyUID`/`VerifyUIDBase64` handle the simpler plaintext
 SUN and the ECDSA UID-signature checks respectively.
 
-### 2.4 Key material (`card/verify_base.go`, `card/card_db.go`)
+### 2.5 Key material (`card/verify_base.go`, `card/card_db.go`)
 Two **server-wide** keys (generated once, persisted to files, reused forever):
 - `AppMasterKey` — loaded from `<dbPath>/appmasterkey` (16 random bytes, created
   if missing). This is **NTAG 424 DNA application key 0**, NOT a server
@@ -99,8 +133,8 @@ Two **server-wide** keys (generated once, persisted to files, reused forever):
   *physical tag* (over the USB NFC reader) when provisioning or reconfiguring a
   tag; the server only stores it and returns it to the desktop in the
   `cardwrite` response so the desktop can perform the write. The server does
-  NOT use `AppMasterKey` to authenticate the desktop app (that is a separate
-  admin-session mechanism via `adminsession.db`).
+  NOT use `AppMasterKey` to authenticate the desktop app — client logins are
+  verified against the account store `userdb.db` (§2.3).
 - `SdmMetaKey` — loaded from `<dbPath>/metakey`. This is NTAG 424 DNA key 2
   (SDM Meta Read Key), used by the server to decrypt PICC data from a tapped
   tag during verification.
@@ -115,13 +149,16 @@ SDM File Read Key (key 1).
 > the live path uses `loadOrCreateAESKey` + UUID fkey. Verify against current
 > code before trusting any doc that references them.
 
-### 2.5 Database (`card/card_db.go`)
+### 2.6 Database (`card/card_db.go`, `card/card_user.go`)
 bbolt key/value stores:
-- `admin.db` → buckets `admin-record` (login sessions, varint timestamp) and
-  `admin-hash` (salt + hashed password). `CheckAdminLogin` falls back to a
-  hard-coded default password hash (`pwsalt`/`password` constants in
-  `card_admin.go`) if no salt record exists yet — change password via
-  `ChangeAdminPW`.
+- `userdb.db` → buckets `users` (accounts), `sessions` (active tokens),
+  `loginlog` (append-only history) and `meta` (bootstrap-account marker). This
+  is the authoritative credential store — see §2.3.
+- `admin.db` → buckets `admin-record` (legacy API sessions, no longer
+  authoritative) and `admin-hash` (salt + hashed password). `CheckAdminLogin`
+  falls back to a hard-coded default password hash (`pwsalt`/`password`
+  constants in `card_admin.go`) when no salt record exists — now used **only**
+  for the empty-userdb bootstrap.
 - `carddata.db` → buckets:
   - `card-data` — key = 7-byte UID; value = JSON `{sign, ctr(base64), link,
     fkey(hex), status}`.
@@ -206,7 +243,9 @@ so the written tag uses default-key auth (used to wipe/reuse a tag).
 ---
 
 ## 4. End-to-end: issuing a tag (Writer)
-1. Desktop logs in (`/verify/api/login`) → token.
+1. Desktop logs in (`/verify/api/login`) → token. Either role works here: the
+   writer flow only touches `modellist`, `cardsearch` and `cardwrite`, which are
+   exactly the operator-allowed routes.
 2. Desktop optionally picks a model from `/verify/api/modellist`.
 3. Desktop taps tag → reads UID + 56-byte signature.
 4. Desktop POSTs `/verify/api/cardwrite` with `id=uid, sign=sig, link=modelId`.
@@ -234,17 +273,26 @@ so the written tag uses default-key auth (used to wipe/reuse a tag).
 - `local/` (server) appears to be a standalone Node/JS local testing UI with its
   own `.db` files — separate from the main Go binary; use only for local dev.
 - LRP mode is incomplete in the server and unsupported on the desktop.
-- Default admin password fallback exists in code (`card_admin.go`); ensure
-  `ChangeAdminPW` was run in production.
+- **The `admin`/`123456` default** is only accepted to seed the first account
+  from an empty `userdb.db`; that account is flagged `mustChange` and shows a
+  banner until the password is changed. Confirm this was done on every deploy.
+- Role enforcement lives entirely in the server (`checkAdminVerify` /
+  `checkOperatorVerify`). Clients are unchanged — they still send only
+  username + password, so a compromised client cannot grant itself a role.
+- The GUI is unusable if `userdb.db` cannot be opened (the operator guard needs
+  a resolvable session). Treat that as an outage, not as "legacy mode".
 
 ## 7. File map (quick reference)
-**Server (Go):**
+**Server (Go)** — see `SERVER_REFERENCE.md` for the full route/DB reference:
 - `main.go` — entry
-- `server/server_main.go`, `server_card_verify.go`, `server_admin.go` — routes
+- `server/server_main.go`, `server_card_verify.go`, `server_admin.go`,
+  `server_search.go` — routes and guards
 - `card/verify_base.go` — SDM MAC + ECDSA verify, key loading
-- `card/card_db.go` — bbolt schema, admin auth, card/model CRUD
-- `card/card_admin.go` — sessions, password hashing
+- `card/card_db.go` — bbolt card/model CRUD + legacy `admin.db` credentials
+- `card/card_user.go` — `userdb.db`: accounts, sessions, login log, roles
+- `card/card_admin.go` — login/session orchestration, role + password changes
 - `card/lrp.go` — LRP (partial)
+- `local/html`, `local/js/admin` — admin UI (security, login log, card verify)
 - `ancientAuth/`, `source/` — legacy key code (historical)
 - `docs/*.md`, `*.md` — possibly stale docs
 

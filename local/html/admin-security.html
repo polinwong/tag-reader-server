@@ -18,7 +18,7 @@ Creater: Kevin Mak, October 2021
 
   <h4 class="pt-3">Change password</h4>
   <p>Changing password for: <strong>{{ .username }}</strong></p>
-  <form id="changeForm" autocomplete="off">
+  <form id="changeForm" method="post" autocomplete="off" novalidate>
     <div class="form-group">
       <label for="orgpw">Current password <span class="text-danger">*</span></label>
       <div class="input-group">
@@ -52,7 +52,7 @@ Creater: Kevin Mak, October 2021
   {{ if eq .role "admin" }}
   <h4 class="pt-5">User role management</h4>
   <p class="text-muted">Select a user and assign their role. At least one admin must always remain.</p>
-  <form id="roleForm">
+  <form id="roleForm" method="post" novalidate>
     <div class="form-group">
       <label for="userSelect">User</label>
       <select class="form-control" id="userSelect"></select>
@@ -72,7 +72,7 @@ Creater: Kevin Mak, October 2021
 
   <h4 class="pt-5">Create user</h4>
   <p class="text-muted">New accounts must change their password at first login.</p>
-  <form id="createForm" autocomplete="off">
+  <form id="createForm" method="post" autocomplete="off" novalidate>
     <div class="form-group">
       <label for="newUsername">Username</label>
       <input type="text" class="form-control" id="newUsername" autocomplete="off" placeholder="">
@@ -101,7 +101,7 @@ Creater: Kevin Mak, October 2021
 
   <h4 class="pt-5">Reset user password</h4>
   <p class="text-muted">Select a user and set a new password; they must change it at next login.</p>
-  <form id="resetForm" autocomplete="off">
+  <form id="resetForm" method="post" autocomplete="off" novalidate>
     <div class="form-group">
       <label for="resetUserSelect">User</label>
       <select class="form-control" id="resetUserSelect"></select>

@@ -48,12 +48,23 @@ const (
 	RoleOperator = "operator"
 )
 
-// UserInfo is the database record entry for an account.
+// UserInfo is the database record entry for an account. Rec and Salt are the
+// password material: they are serialised to/from the store but must never be
+// returned to a client (see UserListView and UserList).
 type UserInfo struct {
 	ID         string `json:"id"`
 	Username   string `json:"username"`
 	Rec        string `json:"rec"`
 	Salt       string `json:"salt"`
+	Role       string `json:"role"`
+	MustChange bool   `json:"mustChange"`
+}
+
+// UserListView is the safe projection of an account that may be exposed to
+// clients (the admin role-management UI). It deliberately omits Rec and Salt.
+type UserListView struct {
+	ID         string `json:"id"`
+	Username   string `json:"username"`
 	Role       string `json:"role"`
 	MustChange bool   `json:"mustChange"`
 }
@@ -573,9 +584,9 @@ func (b *UserDatabase) UserAdminResetPW(userID, newPW string) (err error) {
 	return b.UserSetMustChange(userID, true)
 }
 
-// UserList returns every account (id, username, role, mustChange) for the
-// admin role-management UI. Password material is never included.
-func (b *UserDatabase) UserList() (list []UserInfo, err error) {
+// UserList returns every account as a UserListView projection for the admin
+// role-management UI. Password material (rec/salt) is never included.
+func (b *UserDatabase) UserList() (list []UserListView, err error) {
 	err = b.userDb.View(func(tx ITx) error {
 		buk := tx.Bucket([]byte(DB_USER))
 		if buk == nil {
@@ -586,7 +597,12 @@ func (b *UserDatabase) UserList() (list []UserInfo, err error) {
 			if e := json.Unmarshal(v, &info); e != nil {
 				return e
 			}
-			list = append(list, info)
+			list = append(list, UserListView{
+				ID:         info.ID,
+				Username:   info.Username,
+				Role:       info.Role,
+				MustChange: info.MustChange,
+			})
 			return nil
 		})
 	})

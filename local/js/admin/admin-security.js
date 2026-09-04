@@ -4,10 +4,14 @@
 // (c)Marvel Digital Ltd. 2021
 
 $(document).ready(function () {
-  $("#changebtn").on('click', onChangeClicked);
-  $("#rolebtn").on('click', onRoleClicked);
-  $("#createbtn").on('click', onCreateClicked);
-  $("#resetbtn").on('click', onResetClicked);
+  // Bind to the form *submit* events (not just the button clicks) so that
+  // pressing Enter inside a field is also caught. Each handler calls
+  // preventDefault(); with method="post" + novalidate a native submission can
+  // never turn into a GET with the password in the address bar.
+  $("#changeForm").on('submit', onChangeClicked);
+  $("#roleForm").on('submit', onRoleClicked);
+  $("#createForm").on('submit', onCreateClicked);
+  $("#resetForm").on('submit', onResetClicked);
 
   // Show/hide password toggles (event delegation so dynamically added toggles work too).
   $(document).on('click', '.pw-toggle', function (e) {

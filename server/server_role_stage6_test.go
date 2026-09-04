@@ -72,8 +72,12 @@ func TestStage6SecurityUI(t *testing.T) {
 	// The mustChange warning banner is shown.
 	sec.Body().Contains("default bootstrap credentials")
 
-	// Admin userlist reachable.
-	e.GET("/verify/admin/userlist").Expect().JSON().Object().Value("msg").Equal("OK")
+	// Admin userlist reachable and never exposes password material (rec/salt).
+	ul := e.GET("/verify/admin/userlist").Expect()
+	ul.Status(iris.StatusOK)
+	ul.JSON().Object().Value("msg").Equal("OK")
+	ul.Body().NotContains(`"rec"`)
+	ul.Body().NotContains(`"salt"`)
 
 	// --- Operator: reaches the operator security page, no role section ---
 	id, _ := card.UserNewID()
